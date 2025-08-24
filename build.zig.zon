@@ -1,0 +1,18 @@
+.{
+    .name = .zfs_restore,
+    .version = "0.0.0",
+    .fingerprint = 0xf4602157f5f7b2fe,
+    .minimum_zig_version = "0.15.1",
+    .dependencies = .{
+        .axe = .{
+            .url = "git+https://github.com/Ratakor/axe#17d09525e14dc17210b360d7a46e2a802aee599f",
+            .hash = "axe-0.7.0-M2JU5WyIAADSGzSjOHTugDCZrPbwU-ttzHvEt0AuVxh7",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "LICENSE",
+    },
+}
