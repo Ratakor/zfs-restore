@@ -2,91 +2,34 @@
 // TODO: add interactive mode
 
 const std = @import("std");
-pub const axe = @import("axe").Axe(.{
-    .mutex = .{ .function = .progress_stderr },
-});
+const log = @import("log.zig").axe;
 
 pub const std_options: std.Options = .{
-    .logFn = axe.log,
+    .logFn = log.log,
 };
 
-const FstabEntry = struct {
+const Dataset = struct {
     filesystem: []const u8,
     mountpoint: []const u8,
-    type: []const u8,
-    options: []const u8,
-    dump: u8,
-    pass: u8,
-
-    pub fn deinit(self: FstabEntry, allocator: std.mem.Allocator) void {
-        allocator.free(self.filesystem);
-        allocator.free(self.mountpoint);
-        allocator.free(self.type);
-        allocator.free(self.options);
-    }
 };
 
-fn parseFstab(allocator: std.mem.Allocator) !std.ArrayList(FstabEntry) {
-    const fstab_path = "/etc/fstab";
-    const fstab_file = try std.fs.cwd().openFile(fstab_path, .{});
-    defer fstab_file.close();
-
-    var buffer: [4096]u8 = undefined;
-    var reader = fstab_file.reader(&buffer);
-
-    var entries: std.ArrayList(FstabEntry) = .empty;
-
-    while (true) {
-        const _line = reader.interface.takeDelimiterExclusive('\n') catch |err| switch (err) {
-            error.EndOfStream => break,
-            else => return err,
-        };
-
-        const end = std.mem.indexOfScalar(u8, _line, '#') orelse _line.len;
-        const line = _line[0..end];
-
-        if (line.len == 0) continue;
-
-        var fields = std.mem.tokenizeAny(u8, line, &std.ascii.whitespace);
-        const filesystem = fields.next().?;
-        const mountpoint = fields.next().?;
-        const _type = fields.next().?;
-        const options = fields.next().?;
-        const dump = try std.fmt.parseInt(u8, fields.next() orelse "0", 10);
-        const pass = try std.fmt.parseInt(u8, fields.next() orelse "0", 10);
-        std.debug.assert(fields.next() == null);
-
-        try entries.append(allocator, .{
-            .filesystem = try allocator.dupe(u8, filesystem),
-            .mountpoint = try allocator.dupe(u8, mountpoint),
-            .type = try allocator.dupe(u8, _type),
-            .options = try allocator.dupe(u8, options),
-            .dump = dump,
-            .pass = pass,
-        });
-    }
-
-    // for (entries.items) |entry| {
-    //     std.log.debug("Fstab Entry: {s} {s} {s} {s} {d} {d}", .{
-    //         entry.filesystem,
-    //         entry.mountpoint,
-    //         entry.type,
-    //         entry.options,
-    //         entry.dump,
-    //         entry.pass,
-    //     });
-    // }
-
-    return entries;
-}
+const ZfsMountOutput = struct {
+    output_version: struct {
+        command: []const u8,
+        vers_major: u32,
+        vers_minor: u32,
+    },
+    datasets: std.json.ArrayHashMap(Dataset),
+};
 
 pub fn main() !u8 {
+    // TODO: use an arena
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    try axe.init(allocator, null, null);
-    defer axe.deinit(allocator);
+    try log.init(allocator, null, null);
+    defer log.deinit(allocator);
 
     // TODO: use an arg parser
     var args = try std.process.argsWithAllocator(allocator);
@@ -95,10 +38,10 @@ pub fn main() !u8 {
     _ = args.next(); // progname
 
     const filename = args.next() orelse {
-        std.log.err("Usage: zfs-restore <file>", .{});
+        log.err("Usage: zfs-restore <file>", .{});
         return 1;
     };
-    std.log.debug("Input file: {s}", .{filename});
+    log.debugAt(@src(), "Input file: {s}", .{filename});
     const realpath = blk: {
         // TODO: fix that
         // resolve .. correctly like
@@ -110,103 +53,56 @@ pub fn main() !u8 {
         break :blk try std.fs.path.join(allocator, &.{ wd, filename });
     };
     defer allocator.free(realpath);
-    std.log.debug("Resolved path: {s}", .{realpath});
+    log.debugAt(@src(), "Resolved path: {s}", .{realpath});
 
     const result = try std.process.Child.run(.{
         .allocator = allocator,
-        .argv = &.{ "zfs", "list", "-H", "-t", "filesystem", "-o", "name,mountpoint,mounted" },
+        .argv = &.{ "zfs", "mount", "--json" },
     });
     defer {
         allocator.free(result.stdout);
         allocator.free(result.stderr);
     }
 
+    log.debugAt(@src(), "stdout: {s}", .{result.stdout});
+    log.debugAt(@src(), "stderr: {s}", .{result.stderr});
+
     switch (result.term) {
         .Exited => |code| {
             if (code != 0) {
-                std.log.err("Command exited with non-zero code: {}", .{code});
-                std.log.debug("stdout:\n{s}", .{result.stdout});
-                std.log.debug("stderr:\n{s}", .{result.stderr});
+                log.err("Command exited with non-zero code: {}", .{code});
                 return 1;
             }
         },
         .Signal => |signal| {
-            std.log.err("Command was terminated by signal: {}", .{signal});
-            std.log.debug("stdout:\n{s}", .{result.stdout});
-            std.log.debug("stderr:\n{s}", .{result.stderr});
+            log.err("Command was terminated by signal: {}", .{signal});
             return 1;
         },
         else => {
-            std.log.err("Command terminated unexpectedly", .{});
-            std.log.debug("stdout:\n{s}", .{result.stdout});
-            std.log.debug("stderr:\n{s}", .{result.stderr});
-            std.log.debug("term: {}", .{result.term});
+            log.err("Command terminated unexpectedly", .{});
+            log.debugAt(@src(), "term: {}", .{result.term});
             return 1;
         },
     }
 
-    std.log.debug("stdout:\n{s}", .{result.stdout});
-    std.log.debug("stderr:\n{s}", .{result.stderr});
+    const parsed = try std.json.parseFromSlice(ZfsMountOutput, allocator, result.stdout, .{});
+    defer parsed.deinit();
 
-    var fstab = try parseFstab(allocator);
-    defer {
-        for (fstab.items) |entry| {
-            entry.deinit(allocator);
-        }
-        fstab.deinit(allocator);
+    log.debugAt(@src(), "Found {d} datasets with {s} v{d}.{d}", .{
+        parsed.value.datasets.map.count(),
+        parsed.value.output_version.command,
+        parsed.value.output_version.vers_major,
+        parsed.value.output_version.vers_minor,
+    });
+    for (parsed.value.datasets.map.values()) |entry| {
+        log.debugAt(@src(), "Dataset: {s} mounted at {s}", .{ entry.filesystem, entry.mountpoint });
     }
 
-    const Filesystem = struct {
-        name: []const u8,
-        mountpoint: []const u8,
-    };
-
-    var datasets: std.ArrayList(Filesystem) = .empty;
-    defer {
-        for (datasets.items) |dataset| {
-            allocator.free(dataset.name);
-            allocator.free(dataset.mountpoint);
-        }
-        datasets.deinit(allocator);
-    }
-
-    var it = std.mem.tokenizeScalar(u8, result.stdout, '\n');
-    while (it.next()) |line| {
-        var fields = std.mem.tokenizeAny(u8, line, &std.ascii.whitespace);
-        const name = fields.next().?;
-        const mountpoint = fields.next().?;
-        const mounted = fields.next().?;
-
-        if (std.mem.eql(u8, mounted, "yes")) {
-            if (std.mem.eql(u8, mountpoint, "legacy")) {
-                // find mountpoint via /etc/fstab
-                for (fstab.items) |entry| {
-                    if (std.mem.eql(u8, entry.filesystem, name)) {
-                        try datasets.append(allocator, .{
-                            .name = try allocator.dupe(u8, name),
-                            .mountpoint = try allocator.dupe(u8, entry.mountpoint),
-                        });
-                        break;
-                    }
-                }
-            } else {
-                try datasets.append(allocator, .{
-                    .name = try allocator.dupe(u8, name),
-                    .mountpoint = try allocator.dupe(u8, mountpoint),
-                });
-            }
-        }
-
-        std.debug.assert(fields.next() == null);
-    }
-
-    for (datasets.items) |dataset| {
-        std.log.debug("Filesystem: {s}, Mountpoint: {s}", .{ dataset.name, dataset.mountpoint });
-    }
+    const datasets = parsed.value.datasets.map.values();
 
     // find the dataset with the longest matching mountpoint prefix
-    var best_match: ?*const Filesystem = null;
-    for (datasets.items) |*dataset| {
+    var best_match: ?*const Dataset = null;
+    for (datasets) |*dataset| {
         if (std.mem.startsWith(u8, realpath, dataset.mountpoint)) {
             if (best_match == null or dataset.mountpoint.len > best_match.?.mountpoint.len) {
                 best_match = dataset;
@@ -214,14 +110,14 @@ pub fn main() !u8 {
         }
     }
     if (best_match == null) {
-        std.log.err("No matching dataset found for path: {s}", .{realpath});
+        log.err("No matching dataset found for path: {s}", .{realpath});
         return 1;
     }
 
     const dataset = best_match.?;
-    std.log.debug("Best match: {s} mounted at {s}", .{ dataset.name, dataset.mountpoint });
+    log.debugAt(@src(), "Best match: {s} mounted at {s}", .{ dataset.filesystem, dataset.mountpoint });
     const relative_path = realpath[dataset.mountpoint.len..];
-    std.log.debug("Relative path: {s}", .{relative_path});
+    log.debugAt(@src(), "Relative path: {s}", .{relative_path});
 
     const snapshot_dirname = try std.fs.path.join(allocator, &.{ dataset.mountpoint, ".zfs", "snapshot" });
     defer allocator.free(snapshot_dirname);
@@ -245,7 +141,7 @@ pub fn main() !u8 {
     var iter = snapshot_dir.iterate();
     while (try iter.next()) |entry| {
         if (entry.kind != .directory) {
-            std.log.warn("Skipping non-directory entry in snapshot dir: '{s}'", .{entry.name});
+            log.warn("Skipping non-directory entry in snapshot dir: '{s}'", .{entry.name});
             continue;
         }
         // parse datetime from name
@@ -277,31 +173,71 @@ pub fn main() !u8 {
     }.lessThan);
 
     for (entries.items) |entry| {
-        std.log.debug("Sorted snapshot: {s} -> {d}", .{ entry.name, entry.datetime });
+        log.debugAt(@src(), "Sorted snapshot: {s} -> {d}", .{ entry.name, entry.datetime });
     }
 
     // try to find the first snapshot that contains the relative path
     const snap_path, const snap_file = for (entries.items) |entry| {
         const snapshot_path = try std.fs.path.join(allocator, &.{ snapshot_dirname, entry.name, relative_path });
         defer allocator.free(snapshot_path);
-        std.log.debug("Checking snapshot path: {s}", .{snapshot_path});
+        log.debugAt(@src(), "Checking snapshot path: {s}", .{snapshot_path});
         const file = std.fs.cwd().openFile(snapshot_path, .{}) catch |err| switch (err) {
             error.FileNotFound => continue,
             else => {
-                std.log.err("Error checking snapshot path '{s}': {}", .{ snapshot_path, err });
+                log.err("Error checking snapshot path '{s}': {}", .{ snapshot_path, err });
                 return err;
             },
         };
         break .{ entry.name, file };
     } else {
-        std.log.err("No snapshot found containing path: '{s}'", .{realpath});
+        log.err("No snapshot found containing path: '{s}'", .{realpath});
         return 1;
     };
     defer snap_file.close();
 
-    std.log.debug("Found snapshot in '{s}'", .{snap_path});
+    log.debugAt(@src(), "Found snapshot in '{s}'", .{snap_path});
 
     // TODO: ask to restore
 
     return 0;
+}
+
+test {
+    const allocator = std.testing.allocator;
+    const json_text =
+        \\{
+        \\  "output_version": {
+        \\    "command": "zfs mount",
+        \\    "vers_major": 0,
+        \\    "vers_minor": 1
+        \\  },
+        \\  "datasets": {
+        \\    "zpool/root": {
+        \\      "filesystem": "zpool/root",
+        \\      "mountpoint": "/"
+        \\    },
+        \\    "zpool/var": {
+        \\      "filesystem": "zpool/var",
+        \\      "mountpoint": "/var"
+        \\    },
+        \\    "zpool/nix": {
+        \\      "filesystem": "zpool/nix",
+        \\      "mountpoint": "/nix/store"
+        \\    },
+        \\    "zpool/home": {
+        \\      "filesystem": "zpool/home",
+        \\      "mountpoint": "/home"
+        \\    }
+        \\  }
+        \\}
+    ;
+
+    const parsed = try std.json.parseFromSlice(ZfsMountOutput, allocator, json_text, .{});
+    defer parsed.deinit();
+
+    var writer: std.Io.Writer.Allocating = .init(allocator);
+    defer writer.deinit();
+    try writer.writer.print("{f}", .{std.json.fmt(parsed.value, .{ .whitespace = .indent_2 })});
+
+    try std.testing.expectEqualStrings(json_text, writer.written());
 }
