@@ -1,6 +1,7 @@
 // TODO: not all in one file lol
 
 const std = @import("std");
+const sizeify = @import("sizeify");
 const log = @import("log.zig").axe;
 const snap = @import("snapshots.zig");
 
@@ -137,7 +138,7 @@ pub fn main() !u8 {
     var i: usize = entries.len;
     for (entries) |entry| {
         i -= 1;
-        try stdout.interface.print("{d: >4} {s} {d}\n", .{ i, entry.name, entry.size });
+        try stdout.interface.print("{d: >4} {s} {f}\n", .{ i, entry.name, sizeify.fmt(entry.size, .decimal_short), });
     }
     try stdout.interface.print("What file to restore [0..{d}]: ", .{entries.len});
     try stdout.interface.flush();

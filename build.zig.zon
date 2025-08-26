@@ -8,6 +8,10 @@
             .url = "git+https://github.com/Ratakor/axe#17d09525e14dc17210b360d7a46e2a802aee599f",
             .hash = "axe-0.7.0-M2JU5WyIAADSGzSjOHTugDCZrPbwU-ttzHvEt0AuVxh7",
         },
+        .sizeify = .{
+            .url = "git+https://github.com/ratakor/sizeify#22d4a78bf1c9fb97cede4e4a11ad0d5b5bf013a1",
+            .hash = "sizeify-0.0.0-URVFj1EhAAAXtotBNFwEx5W70ygRnAdHjBYcg4F_CahM",
+        },
     },
     .paths = .{
         "build.zig",

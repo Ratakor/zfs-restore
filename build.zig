@@ -8,6 +8,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const sizeify = b.dependency("sizeify", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
     const exe = b.addExecutable(.{
         .name = "zfs_restore",
@@ -17,6 +21,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "axe", .module = axe.module("axe") },
+                .{ .name = "sizeify", .module = sizeify.module("sizeify") },
             },
         }),
     });
