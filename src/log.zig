@@ -1,5 +1,6 @@
 const std = @import("std");
 const known_folders = @import("known_folders");
+const sizeify = @import("sizeify");
 
 pub const axe = @import("axe").Axe(.{
     .mutex = .{ .function = .progress_stderr },
@@ -9,9 +10,14 @@ pub const axe = @import("axe").Axe(.{
 
 const log_file_name = "zfs-restore.log";
 var log_file_buffer: [256]u8 = undefined;
-var log_file_writer: std.fs.File.Writer = undefined;
+var log_file_writer: std.fs.File.Writer = undefined; // set in init
 
-pub fn init(allocator: std.mem.Allocator) !void {
+var fba_buffer: [4 * 4096]u8 = undefined;
+var fba: std.heap.FixedBufferAllocator = .init(&fba_buffer);
+
+pub fn init() !void {
+    const allocator = fba.allocator();
+
     var log_dir = try known_folders.open(allocator, .logs, .{}) orelse return error.EnvironmentVariableNotFound;
     defer log_dir.close();
 
@@ -28,9 +34,13 @@ pub fn init(allocator: std.mem.Allocator) !void {
     log_file_writer = log_file.writerStreaming(&log_file_buffer);
 
     try axe.init(allocator, &.{&log_file_writer.interface}, null);
+
+    axe.debugAt(@src(), "Used {f} of memory", .{sizeify.fmt(fba.end_index, .binary_short)});
 }
 
-pub fn deinit(allocator: std.mem.Allocator) void {
-    log_file_writer.file.close();
-    axe.deinit(allocator);
+// noop as axe shouldn't be deinitialized if set in std_options & using time or
+// additional writers
+pub fn deinit() void {
+    // log_file_writer.file.close();
+    // axe.deinit(allocator);
 }

@@ -1,5 +1,3 @@
-// TODO: not all in one file lol
-
 const std = @import("std");
 const sizeify = @import("sizeify");
 const _log = @import("log.zig");
@@ -16,8 +14,8 @@ pub fn main() !u8 {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    try _log.init(allocator);
-    defer _log.deinit(allocator);
+    try _log.init();
+    defer _log.deinit();
 
     // TODO: use an arg parser
     ////////////////////////////////////////////////////////////////////////////
@@ -34,12 +32,12 @@ pub fn main() !u8 {
     log.debugAt(@src(), "Input file: {s}", .{filename});
 
     if (std.fs.cwd().access(filename, .{})) {
-        log.warn("File {s} already exist", .{filename});
+        log.warn("'{s}' already exist", .{filename});
     } else |err| switch (err) {
         error.FileNotFound => {},
         else => {
-            log.err("Error accessing file {s}: {}", .{ filename, err });
-            return err;
+            log.err("Error accessing file '{s}': {t}", .{ filename, err });
+            return 1;
         },
     }
 
@@ -60,6 +58,7 @@ pub fn main() !u8 {
     const dataset = try zfs.findDataset(allocator, realpath);
     defer dataset.deinit(allocator);
 
+    // TODO: we are here
     const entries = try snap.getEntries(allocator, dataset.mountpoint, realpath);
     defer {
         for (entries) |entry| {
@@ -97,8 +96,11 @@ pub fn main() !u8 {
 
     var stdin_buffer: [256]u8 = undefined;
     var stdin = std.fs.File.stdin().reader(&stdin_buffer);
-    const input = try stdin.interface.takeDelimiterExclusive('\n');
-    std.log.debug("Input: {s}", .{input});
+    const input = stdin.interface.takeDelimiterExclusive('\n') catch |err| switch (err) {
+        error.EndOfStream => return 1,
+        else => return err,
+    };
+    log.debugAt(@src(), "Input: {s}", .{input});
 
     const parsed_input = if (input.len == 0) blk: {
         log.info("No input, defaulting to 0", .{});
@@ -111,7 +113,7 @@ pub fn main() !u8 {
     }
 
     const to_restore = &entries[parsed_input];
-    log.debugAt(@src(), "Restoring snapshot: {s}", .{to_restore.path});
+    log.debugAt(@src(), "Restoring snapshot: {s}", .{to_restore.name});
     log.debugAt(@src(), "realpath: {s}", .{realpath});
 
     // pub fn copyFile(
@@ -154,13 +156,13 @@ pub fn main() !u8 {
     defer allocator.free(realpath_debug);
     log.debugAt(@src(), "realpath_debug: {s}", .{realpath_debug});
 
-    try std.fs.Dir.copyFile(
-        snapshot_dir,
-        to_restore.path, // TODO: then do we need file in SnapshotEntry?
-        std.fs.cwd(),
-        realpath_debug,
-        .{},
-    );
+    // try std.fs.Dir.copyFile(
+    //     snapshot_dir,
+    //     to_restore.path, // TODO: then do we need file in SnapshotEntry?
+    //     std.fs.cwd(),
+    //     realpath_debug,
+    //     .{},
+    // );
 
     return 0;
 }

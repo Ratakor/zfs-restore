@@ -84,7 +84,11 @@ pub fn findDataset(allocator: std.mem.Allocator, path: []const u8) !Dataset {
     }
 
     const dataset = best_match.?;
-    log.debugAt(@src(), "Best match: {s} mounted at {s}", .{ dataset.filesystem, dataset.mountpoint });
+    log.debugAt(@src(), "Best match for '{s}': {s} mounted at {s}", .{
+        path,
+        dataset.filesystem,
+        dataset.mountpoint,
+    });
 
     return .{
         .filesystem = try allocator.dupe(u8, dataset.filesystem),

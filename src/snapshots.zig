@@ -44,10 +44,10 @@ pub fn getEntries(
     realpath: []const u8,
 ) ![]SnapshotEntry {
     const relative_path = realpath[mountpoint.len..];
-    log.debugAt(@src(), "Relative path: {s}", .{relative_path});
+    log.debugAt(@src(), "relative_path: {s}", .{relative_path});
     const snapshot_dirname = try std.fs.path.join(allocator, &.{ mountpoint, ".zfs", "snapshot" });
     defer allocator.free(snapshot_dirname);
-    log.debugAt(@src(), "Opening snapshot dir: '{s}'", .{snapshot_dirname});
+    log.debugAt(@src(), "snapshot_dirname: {s}", .{snapshot_dirname});
     var snapshot_dir = try std.fs.cwd().openDir(snapshot_dirname, .{ .iterate = true });
     defer snapshot_dir.close();
 
@@ -64,19 +64,23 @@ pub fn getEntries(
     var duplicate_entries: usize = 0;
     while (try iter.next()) |entry| : (total_snapshots += 1) {
         if (entry.kind != .directory) {
-            log.warn("Skipping non-directory entry in snapshot dir: '{s}'", .{entry.name});
+            log.warn("Skipping non-directory entry in '{s}': {s}", .{ snapshot_dirname, entry.name });
             continue;
         }
 
-        const path = try std.fs.path.join(allocator, &.{ snapshot_dirname, entry.name, relative_path });
+        const path = try std.fs.path.join(allocator, &.{ entry.name, relative_path });
         errdefer allocator.free(path);
-        const file = std.fs.cwd().openFile(path, .{}) catch |err| switch (err) {
+        const file = snapshot_dir.openFile(path, .{}) catch |err| switch (err) {
             error.FileNotFound => {
                 allocator.free(path);
                 continue;
             },
             else => {
-                log.err("Error checking snapshot path '{s}': {}", .{ path, err });
+                log.err("Error checking snapshot path '{s}/{s}': {t}", .{
+                    snapshot_dirname,
+                    path,
+                    err,
+                });
                 return err;
             },
         };
