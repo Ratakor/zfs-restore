@@ -1,8 +1,8 @@
 // TODO: not all in one file lol
-// TODO: add interactive mode
 
 const std = @import("std");
 const log = @import("log.zig").axe;
+const snap = @import("snapshots.zig");
 
 pub const std_options: std.Options = .{
     .logFn = log.log,
@@ -116,88 +116,34 @@ pub fn main() !u8 {
 
     const dataset = best_match.?;
     log.debugAt(@src(), "Best match: {s} mounted at {s}", .{ dataset.filesystem, dataset.mountpoint });
-    const relative_path = realpath[dataset.mountpoint.len..];
-    log.debugAt(@src(), "Relative path: {s}", .{relative_path});
 
-    const snapshot_dirname = try std.fs.path.join(allocator, &.{ dataset.mountpoint, ".zfs", "snapshot" });
-    defer allocator.free(snapshot_dirname);
-    var snapshot_dir = try std.fs.cwd().openDir(snapshot_dirname, .{ .iterate = true });
-    defer snapshot_dir.close();
-
-    // TODO: expecting format 'zfs-auto-snap_FREQUENCY-YYYY-MM-DD-HHhMM'
-    const SnapshotEntry = struct {
-        name: []const u8,
-        datetime: u64, // YYYYMMDDHHMM
-    };
-
-    var entries: std.ArrayList(SnapshotEntry) = .empty;
+    const entries = try snap.getEntries(allocator, dataset.mountpoint, realpath);
     defer {
-        for (entries.items) |entry| {
-            allocator.free(entry.name);
+        for (entries) |entry| {
+            entry.deinit(allocator);
         }
-        entries.deinit(allocator);
+        allocator.free(entries);
     }
 
-    var iter = snapshot_dir.iterate();
-    while (try iter.next()) |entry| {
-        if (entry.kind != .directory) {
-            log.warn("Skipping non-directory entry in snapshot dir: '{s}'", .{entry.name});
-            continue;
-        }
-        // parse datetime from name
-        var parts = std.mem.tokenizeScalar(u8, entry.name, '-');
-        _ = parts.next(); // zfs
-        _ = parts.next(); // auto
-        _ = parts.next(); // snap_FREQUENCY
-        const year = try std.fmt.parseInt(u64, parts.next().?, 10);
-        const month = try std.fmt.parseInt(u64, parts.next().?, 10);
-        const day = try std.fmt.parseInt(u64, parts.next().?, 10);
-        const hour_min = parts.next().?;
-        const hour = try std.fmt.parseInt(u64, hour_min[0..2], 10);
-        const min = try std.fmt.parseInt(u64, hour_min[3..5], 10);
-        std.debug.assert(parts.next() == null);
+    std.mem.sort(snap.SnapshotEntry, entries, {}, snap.SnapshotEntry.oldestFirst);
 
-        // convert to a comparable integer YYYYMMDDHHMM
-        const datetime = year * 100000000 + month * 1000000 + day * 10000 + hour * 100 + min * 1;
-
-        try entries.append(allocator, .{
-            .name = try allocator.dupe(u8, entry.name),
-            .datetime = datetime,
-        });
-    }
-
-    std.mem.sort(SnapshotEntry, entries.items, {}, struct {
-        fn lessThan(_: void, lhs: SnapshotEntry, rhs: SnapshotEntry) bool {
-            return lhs.datetime > rhs.datetime;
-        }
-    }.lessThan);
-
-    for (entries.items) |entry| {
-        log.debugAt(@src(), "Sorted snapshot: {s} -> {d}", .{ entry.name, entry.datetime });
-    }
-
-    // try to find the first snapshot that contains the relative path
-    const snap_path, const snap_file = for (entries.items) |entry| {
-        const snapshot_path = try std.fs.path.join(allocator, &.{ snapshot_dirname, entry.name, relative_path });
-        defer allocator.free(snapshot_path);
-        log.debugAt(@src(), "Checking snapshot path: {s}", .{snapshot_path});
-        const file = std.fs.cwd().openFile(snapshot_path, .{}) catch |err| switch (err) {
-            error.FileNotFound => continue,
-            else => {
-                log.err("Error checking snapshot path '{s}': {}", .{ snapshot_path, err });
-                return err;
-            },
-        };
-        break .{ entry.name, file };
-    } else {
-        log.err("No snapshot found containing path: '{s}'", .{realpath});
-        return 1;
-    };
-    defer snap_file.close();
-
-    log.debugAt(@src(), "Found snapshot in '{s}'", .{snap_path});
+    log.debugAt(@src(), "first entry: {s}", .{entries[0].name});
 
     // TODO: ask to restore
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout = std.fs.File.stdout().writer(&stdout_buffer);
+
+    // TODO: check if entries.items.len == 1 and == 0
+    var i: usize = entries.len;
+    for (entries) |entry| {
+        i -= 1;
+        try stdout.interface.print("{d: >4} {s} {d}\n", .{ i, entry.name, entry.size });
+    }
+    try stdout.interface.print("What file to restore [0..{d}]: ", .{entries.len});
+    try stdout.interface.flush();
+
+    // var stdin = std.fs.File.stdin().reader(&.{});
+    // _ = try stdin.interface.readByte();
 
     return 0;
 }
