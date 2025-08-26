@@ -46,6 +46,9 @@ pub fn main() !u8 {
         // resolve .. correctly like
         // zfs-restore ../somefile with cwd /home/user
         // should resolve to /home/somefile not /home/user/../somefile
+        if (std.fs.path.isAbsolute(filename)) {
+            break :blk try allocator.dupe(u8, filename);
+        }
         const wd = try std.fs.cwd().realpathAlloc(allocator, ".");
         defer allocator.free(wd);
         break :blk try std.fs.path.join(allocator, &.{ wd, filename });
@@ -59,20 +62,16 @@ pub fn main() !u8 {
     defer dataset.deinit(allocator);
 
     // TODO: we are here
-    const entries = try snap.getEntries(allocator, dataset.mountpoint, realpath);
-    defer {
-        for (entries) |entry| {
-            entry.deinit(allocator);
-        }
-        allocator.free(entries);
-    }
+    var snapshots = try snap.getSnapshots(allocator, dataset.mountpoint, realpath);
+    defer snapshots.deinit(allocator);
+    const entries = snapshots.entries();
 
     if (entries.len == 0) {
         log.info("No snapshots found for file: {s}", .{realpath});
         return 0;
     }
 
-    std.mem.sort(snap.SnapshotEntry, entries, {}, snap.SnapshotEntry.oldestFirst);
+    std.mem.sort(snap.SnapshotEntry, entries, {}, snap.SnapshotEntry.newestFirst);
 
     log.debugAt(@src(), "first entry: {s}", .{entries[0].name});
 
@@ -82,12 +81,12 @@ pub fn main() !u8 {
 
     // TODO: if entries.len == 1 ask a y/N question instead?
     // TODO: add a way to see the files before restoring?
-    var i: usize = entries.len;
-    for (entries) |entry| {
-        i -= 1;
+    var it = std.mem.reverseIterator(entries);
+    while (it.next()) |entry| {
         try stdout.interface.print("{d: >4} {s} ({f})\n", .{
-            i,
+            it.index,
             entry.name,
+            // TODO: entry.mtime, make it look like eza with a header (& colors)?
             sizeify.fmt(entry.size, .decimal_short),
         });
     }
@@ -96,10 +95,7 @@ pub fn main() !u8 {
 
     var stdin_buffer: [256]u8 = undefined;
     var stdin = std.fs.File.stdin().reader(&stdin_buffer);
-    const input = stdin.interface.takeDelimiterExclusive('\n') catch |err| switch (err) {
-        error.EndOfStream => return 1,
-        else => return err,
-    };
+    const input = try stdin.interface.takeDelimiterExclusive('\n');
     log.debugAt(@src(), "Input: {s}", .{input});
 
     const parsed_input = if (input.len == 0) blk: {
@@ -114,53 +110,21 @@ pub fn main() !u8 {
 
     const to_restore = &entries[parsed_input];
     log.debugAt(@src(), "Restoring snapshot: {s}", .{to_restore.name});
-    log.debugAt(@src(), "realpath: {s}", .{realpath});
-
-    // pub fn copyFile(
-    //     source_dir: Dir,
-    //     source_path: []const u8,
-    //     dest_dir: Dir,
-    //     dest_path: []const u8,
-    //     options: CopyFileOptions,
-    // ) CopyFileError!void {
-    //     var file_reader: File.Reader = .init(try source_dir.openFile(source_path, .{}), &.{});
-    //     defer file_reader.file.close();
-
-    //     const mode = options.override_mode orelse blk: {
-    //         const st = try file_reader.file.stat();
-    //         file_reader.size = st.size;
-    //         break :blk st.mode;
-    //     };
-
-    //     var buffer: [1024]u8 = undefined; // Used only when direct fd-to-fd is not available.
-    //     var atomic_file = try dest_dir.atomicFile(dest_path, .{
-    //         .mode = mode,
-    //         .write_buffer = &buffer,
-    //     });
-    //     defer atomic_file.deinit();
-
-    //     _ = atomic_file.file_writer.interface.sendFileAll(&file_reader, .unlimited) catch |err| switch (err) {
-    //         error.ReadFailed => return file_reader.err.?,
-    //         error.WriteFailed => return atomic_file.file_writer.err.?,
-    //     };
-
-    //     try atomic_file.finish();
-    // }
 
     const snapshot_dirname = try std.fs.path.join(allocator, &.{ dataset.mountpoint, ".zfs", "snapshot" });
     defer allocator.free(snapshot_dirname);
     var snapshot_dir = try std.fs.cwd().openDir(snapshot_dirname, .{ .iterate = true });
     defer snapshot_dir.close();
 
-    const realpath_debug = try std.fmt.allocPrint(allocator, "{s}-debug", .{realpath});
-    defer allocator.free(realpath_debug);
-    log.debugAt(@src(), "realpath_debug: {s}", .{realpath_debug});
+    const wd = try std.fs.cwd().realpathAlloc(allocator, ".");
+    defer allocator.free(wd);
+    log.debugAt(@src(), "{s}/{s} -> {s}/{s}", .{ snapshot_dirname, to_restore.path, wd, filename });
 
     // try std.fs.Dir.copyFile(
     //     snapshot_dir,
-    //     to_restore.path, // TODO: then do we need file in SnapshotEntry?
+    //     to_restore.path,
     //     std.fs.cwd(),
-    //     realpath_debug,
+    //     filename,
     //     .{},
     // );
 

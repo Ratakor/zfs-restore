@@ -2,17 +2,32 @@ const std = @import("std");
 const log = @import("log.zig").axe;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
+const max_file_size_for_hash = 10 * 1024 * 1024; // 10 MB
+
 // TODO: handle restoring directories
+
+pub const Snapshots = struct {
+    map: std.StringArrayHashMapUnmanaged(SnapshotEntry) = .empty,
+
+    pub fn deinit(self: *Snapshots, allocator: std.mem.Allocator) void {
+        for (self.map.values()) |entry| {
+            entry.deinit(allocator);
+        }
+        self.map.deinit(allocator);
+    }
+
+    pub fn entries(self: Snapshots) []SnapshotEntry {
+        return self.map.values();
+    }
+};
 
 pub const SnapshotEntry = struct {
     name: []const u8,
     path: []const u8,
-    file: std.fs.File,
     size: u64,
     mtime: i128,
 
     pub fn deinit(self: SnapshotEntry, allocator: std.mem.Allocator) void {
-        self.file.close();
         allocator.free(self.name);
         allocator.free(self.path);
     }
@@ -34,15 +49,14 @@ fn computeHash(file: std.fs.File) ![Sha256.digest_length]u8 {
         sha256.update(buffer[0..n]);
         n = try file.read(&buffer);
     }
-
     return sha256.finalResult();
 }
 
-pub fn getEntries(
+pub fn getSnapshots(
     allocator: std.mem.Allocator,
     mountpoint: []const u8,
     realpath: []const u8,
-) ![]SnapshotEntry {
+) !Snapshots {
     const relative_path = realpath[mountpoint.len..];
     log.debugAt(@src(), "relative_path: {s}", .{relative_path});
     const snapshot_dirname = try std.fs.path.join(allocator, &.{ mountpoint, ".zfs", "snapshot" });
@@ -51,13 +65,8 @@ pub fn getEntries(
     var snapshot_dir = try std.fs.cwd().openDir(snapshot_dirname, .{ .iterate = true });
     defer snapshot_dir.close();
 
-    var map: std.StringArrayHashMapUnmanaged(SnapshotEntry) = .empty;
-    errdefer {
-        for (map.values()) |entry| {
-            entry.deinit(allocator);
-        }
-        map.deinit(allocator);
-    }
+    var snapshots: Snapshots = .{};
+    errdefer snapshots.deinit(allocator);
 
     var iter = snapshot_dir.iterate();
     var total_snapshots: usize = 0;
@@ -84,20 +93,23 @@ pub fn getEntries(
                 return err;
             },
         };
-        errdefer file.close();
+        defer file.close();
 
-        const hash = try computeHash(file);
-        // log.debugAt(@src(), "hash: {s}", .{std.fmt.bytesToHex(&hash, .lower)});
-        const gop = try map.getOrPut(allocator, &hash);
+        const stat = try file.stat();
+        const gop = if (stat.size <= max_file_size_for_hash) gop: {
+            const hash = try computeHash(file);
+            log.debugAt(@src(), "{s}:\t{s}", .{ entry.name, std.fmt.bytesToHex(&hash, .lower) });
+            break :gop try snapshots.map.getOrPut(allocator, &hash);
+        } else gop: {
+            log.debugAt(@src(), "{s}:\t<size too large to hash>", .{entry.name});
+            break :gop try snapshots.map.getOrPut(allocator, entry.name);
+        };
         if (gop.found_existing) {
-            file.close();
             allocator.free(path);
             duplicate_entries += 1;
         } else {
-            const stat = try file.stat();
             gop.value_ptr.* = .{
                 .name = try allocator.dupe(u8, entry.name),
-                .file = file,
                 .path = path,
                 .size = stat.size,
                 .mtime = stat.mtime,
@@ -106,13 +118,10 @@ pub fn getEntries(
     }
 
     log.debugAt(@src(), "Found {d}/{d} valid snapshots with {d} duplicate entries", .{
-        map.count(),
+        snapshots.map.count(),
         total_snapshots,
         duplicate_entries,
     });
 
-    // I don't know how to do otherwise
-    const values = try allocator.dupe(SnapshotEntry, map.values());
-    map.deinit(allocator);
-    return values;
+    return snapshots;
 }
