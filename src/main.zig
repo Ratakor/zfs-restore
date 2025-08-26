@@ -10,6 +10,8 @@ pub const std_options: std.Options = .{
 };
 
 pub fn main() !u8 {
+    const cwd = std.fs.cwd();
+
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -42,7 +44,7 @@ pub fn main() !u8 {
         }
     }
 
-    if (std.fs.cwd().access(filename, .{})) {
+    if (cwd.access(filename, .{})) {
         log.warn("'{s}' already exist", .{filename});
     } else |err| switch (err) {
         error.FileNotFound => {},
@@ -52,17 +54,14 @@ pub fn main() !u8 {
         },
     }
 
-    const realpath = blk: {
-        // TODO: fix that
-        // resolve .. correctly like
-        // zfs-restore ../somefile with cwd /home/user
-        // should resolve to /home/somefile not /home/user/../somefile
+    const realpath = realpath: {
         if (std.fs.path.isAbsolute(filename)) {
-            break :blk try allocator.dupe(u8, filename);
+            break :realpath try std.fs.path.resolve(allocator, &.{filename});
         }
-        const wd = try std.fs.cwd().realpathAlloc(allocator, ".");
-        defer allocator.free(wd);
-        break :blk try std.fs.path.join(allocator, &.{ wd, filename });
+        // https://stackoverflow.com/questions/72709702/how-do-i-get-the-full-path-of-a-std-fs-dir
+        const working_directory = try cwd.realpathAlloc(allocator, ".");
+        defer allocator.free(working_directory);
+        break :realpath try std.fs.path.resolve(allocator, &.{ working_directory, filename });
     };
     defer allocator.free(realpath);
     log.debugAt(@src(), "realpath: {s}", .{realpath});
@@ -77,7 +76,7 @@ pub fn main() !u8 {
     const snapshot_dirname = try std.fs.path.join(allocator, &.{ mountpoint, ".zfs", "snapshot" });
     defer allocator.free(snapshot_dirname);
     log.debugAt(@src(), "snapshot_dirname: {s}", .{snapshot_dirname});
-    var snapshot_dir = try std.fs.cwd().openDir(snapshot_dirname, .{ .iterate = true });
+    var snapshot_dir = try cwd.openDir(snapshot_dirname, .{ .iterate = true });
     defer snapshot_dir.close();
 
     var snapshots = try snap.getSnapshots(
@@ -115,6 +114,7 @@ pub fn main() !u8 {
     try stdout.interface.print("Which version to restore [0..{d}]: ", .{entries.len - 1});
     try stdout.interface.flush();
 
+    // TODO: handle backspace, etc
     var stdin_buffer: [256]u8 = undefined;
     var stdin = std.fs.File.stdin().reader(&stdin_buffer);
     const input = try stdin.interface.takeDelimiterExclusive('\n');
@@ -132,10 +132,10 @@ pub fn main() !u8 {
 
     const to_restore = &entries[parsed_input];
     log.debugAt(@src(), "Restoring snapshot: {s}", .{to_restore.name});
-
-    const wd = try std.fs.cwd().realpathAlloc(allocator, ".");
-    defer allocator.free(wd);
-    log.debugAt(@src(), "{s}/{s} -> {s}/{s}", .{ snapshot_dirname, to_restore.path, wd, filename });
+    log.debugAt(@src(), "{f} -> {s}", .{
+        utils.fmt.join(&.{ snapshot_dirname, to_restore.path }, std.fs.path.sep_str),
+        realpath,
+    });
 
     if (interactive) {
         const pager = env_map.get("PAGER") orelse "less";
@@ -152,13 +152,7 @@ pub fn main() !u8 {
         return 2;
     }
 
-    // try std.fs.Dir.copyFile(
-    //     snapshot_dir,
-    //     to_restore.path,
-    //     std.fs.cwd(),
-    //     filename,
-    //     .{},
-    // );
+    try std.fs.Dir.copyFile(snapshot_dir, to_restore.path, cwd, realpath, .{});
 
     return 0;
 }
