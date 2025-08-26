@@ -1,7 +1,7 @@
 const std = @import("std");
 const sizeify = @import("sizeify");
-const _log = @import("log.zig");
-const log = _log.axe;
+const utils = @import("utils.zig");
+const log = utils.log;
 const zfs = @import("zfs.zig");
 const snap = @import("snapshots.zig");
 
@@ -14,14 +14,19 @@ pub fn main() !u8 {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    try _log.init();
-    defer _log.deinit();
+    var env_map = try std.process.getEnvMap(allocator);
+    defer env_map.deinit();
+
+    try log.init(allocator, null, &env_map);
+    defer log.deinit(allocator);
 
     // TODO: use an arg parser
     ////////////////////////////////////////////////////////////////////////////
 
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
+
+    var interactive = false;
 
     _ = args.next(); // progname
 
@@ -30,6 +35,12 @@ pub fn main() !u8 {
         return 1;
     };
     log.debugAt(@src(), "Input file: {s}", .{filename});
+
+    if (args.next()) |extra| {
+        if (std.mem.eql(u8, extra, "-i") or std.mem.eql(u8, extra, "--interactive")) {
+            interactive = true;
+        }
+    }
 
     if (std.fs.cwd().access(filename, .{})) {
         log.warn("'{s}' already exist", .{filename});
@@ -58,17 +69,29 @@ pub fn main() !u8 {
 
     ////////////////////////////////////////////////////////////////////////////
 
-    const dataset = try zfs.findDataset(allocator, realpath);
-    defer dataset.deinit(allocator);
+    const mountpoint = try zfs.findMountpoint(allocator, realpath);
+    defer allocator.free(mountpoint);
 
-    // TODO: we are here
-    var snapshots = try snap.getSnapshots(allocator, dataset.mountpoint, realpath);
+    const relative_path = realpath[mountpoint.len + 1 ..];
+    log.debugAt(@src(), "relative_path: {s}", .{relative_path});
+    const snapshot_dirname = try std.fs.path.join(allocator, &.{ mountpoint, ".zfs", "snapshot" });
+    defer allocator.free(snapshot_dirname);
+    log.debugAt(@src(), "snapshot_dirname: {s}", .{snapshot_dirname});
+    var snapshot_dir = try std.fs.cwd().openDir(snapshot_dirname, .{ .iterate = true });
+    defer snapshot_dir.close();
+
+    var snapshots = try snap.getSnapshots(
+        allocator,
+        relative_path,
+        snapshot_dirname,
+        snapshot_dir,
+    );
     defer snapshots.deinit(allocator);
     const entries = snapshots.entries();
 
     if (entries.len == 0) {
-        log.info("No snapshots found for file: {s}", .{realpath});
-        return 0;
+        log.err("No snapshot found for: {s}", .{realpath});
+        return 1;
     }
 
     std.mem.sort(snap.SnapshotEntry, entries, {}, snap.SnapshotEntry.newestFirst);
@@ -79,7 +102,6 @@ pub fn main() !u8 {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout = std.fs.File.stdout().writer(&stdout_buffer);
 
-    // TODO: if entries.len == 1 ask a y/N question instead?
     // TODO: add a way to see the files before restoring?
     var it = std.mem.reverseIterator(entries);
     while (it.next()) |entry| {
@@ -111,14 +133,24 @@ pub fn main() !u8 {
     const to_restore = &entries[parsed_input];
     log.debugAt(@src(), "Restoring snapshot: {s}", .{to_restore.name});
 
-    const snapshot_dirname = try std.fs.path.join(allocator, &.{ dataset.mountpoint, ".zfs", "snapshot" });
-    defer allocator.free(snapshot_dirname);
-    var snapshot_dir = try std.fs.cwd().openDir(snapshot_dirname, .{ .iterate = true });
-    defer snapshot_dir.close();
-
     const wd = try std.fs.cwd().realpathAlloc(allocator, ".");
     defer allocator.free(wd);
     log.debugAt(@src(), "{s}/{s} -> {s}/{s}", .{ snapshot_dirname, to_restore.path, wd, filename });
+
+    if (interactive) {
+        const pager = env_map.get("PAGER") orelse "less";
+        const argv = [_][]const u8{ pager, to_restore.path };
+        log.debugAt(@src(), "Running `{f}`", .{utils.fmt.join(&argv, " ")});
+        var child: std.process.Child = .init(&argv, allocator);
+        child.cwd_dir = snapshot_dir;
+        child.env_map = &env_map;
+        try child.spawn();
+        // errdefer _ = child.kill() catch {};
+        const term = try child.wait();
+        try utils.handleTerm(&argv, term);
+        log.debugAt(@src(), "TODO: end of interactive mode, exiting...", .{});
+        return 2;
+    }
 
     // try std.fs.Dir.copyFile(
     //     snapshot_dir,

@@ -12,10 +12,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     }).module("sizeify");
-    const known_folders = b.dependency("known_folders", .{
-        .target = target,
-        .optimize = optimize,
-    }).module("known-folders");
 
     const exe = b.addExecutable(.{
         .name = "zfs_restore",
@@ -26,7 +22,6 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "axe", .module = axe },
                 .{ .name = "sizeify", .module = sizeify },
-                .{ .name = "known_folders", .module = known_folders },
             },
         }),
     });

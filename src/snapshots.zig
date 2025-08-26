@@ -1,5 +1,7 @@
 const std = @import("std");
-const log = @import("log.zig").axe;
+const sizeify = @import("sizeify");
+const utils = @import("utils.zig");
+const log = utils.log;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
 const max_file_size_for_hash = 10 * 1024 * 1024; // 10 MB
@@ -54,17 +56,10 @@ fn computeHash(file: std.fs.File) ![Sha256.digest_length]u8 {
 
 pub fn getSnapshots(
     allocator: std.mem.Allocator,
-    mountpoint: []const u8,
-    realpath: []const u8,
+    relative_path: []const u8,
+    snapshot_dirname: []const u8,
+    snapshot_dir: std.fs.Dir,
 ) !Snapshots {
-    const relative_path = realpath[mountpoint.len..];
-    log.debugAt(@src(), "relative_path: {s}", .{relative_path});
-    const snapshot_dirname = try std.fs.path.join(allocator, &.{ mountpoint, ".zfs", "snapshot" });
-    defer allocator.free(snapshot_dirname);
-    log.debugAt(@src(), "snapshot_dirname: {s}", .{snapshot_dirname});
-    var snapshot_dir = try std.fs.cwd().openDir(snapshot_dirname, .{ .iterate = true });
-    defer snapshot_dir.close();
-
     var snapshots: Snapshots = .{};
     errdefer snapshots.deinit(allocator);
 
@@ -96,12 +91,16 @@ pub fn getSnapshots(
         defer file.close();
 
         const stat = try file.stat();
-        const gop = if (stat.size <= max_file_size_for_hash) gop: {
+        const gop = if (stat.kind == .file and stat.size <= max_file_size_for_hash) gop: {
             const hash = try computeHash(file);
             log.debugAt(@src(), "{s}:\t{s}", .{ entry.name, std.fmt.bytesToHex(&hash, .lower) });
             break :gop try snapshots.map.getOrPut(allocator, &hash);
         } else gop: {
-            log.debugAt(@src(), "{s}:\t<size too large to hash>", .{entry.name});
+            log.debugAt(@src(), "{s}:\t{f}\t{}", .{
+                entry.name,
+                sizeify.fmt(stat.size, .binary_short),
+                stat.kind,
+            });
             break :gop try snapshots.map.getOrPut(allocator, entry.name);
         };
         if (gop.found_existing) {

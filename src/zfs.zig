@@ -1,15 +1,6 @@
 const std = @import("std");
-const log = @import("log.zig").axe;
-
-pub const Dataset = struct {
-    filesystem: []const u8,
-    mountpoint: []const u8,
-
-    pub fn deinit(self: Dataset, allocator: std.mem.Allocator) void {
-        allocator.free(self.filesystem);
-        allocator.free(self.mountpoint);
-    }
-};
+const utils = @import("utils.zig");
+const log = utils.log;
 
 const ZfsMountOutput = struct {
     output_version: struct {
@@ -18,41 +9,29 @@ const ZfsMountOutput = struct {
         vers_minor: u32,
     },
     datasets: std.json.ArrayHashMap(Dataset),
+
+    const Dataset = struct {
+        filesystem: []const u8,
+        mountpoint: []const u8,
+    };
 };
 
-fn runCommand(allocator: std.mem.Allocator) ![]const u8 {
-    const result = try std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &.{ "zfs", "mount", "--json" },
-    });
+fn runZfsMount(allocator: std.mem.Allocator) ![]const u8 {
+    const argv = [_][]const u8{ "zfs", "mount", "--json" };
+    const result = try std.process.Child.run(.{ .allocator = allocator, .argv = &argv });
     errdefer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
     log.debugAt(@src(), "stdout: {s}", .{result.stdout});
     log.debugAt(@src(), "stderr: {s}", .{result.stderr});
 
-    switch (result.term) {
-        .Exited => |code| {
-            if (code != 0) {
-                log.err("Command exited with non-zero code: {}", .{code});
-                return error.CommandFailed;
-            }
-        },
-        .Signal => |signal| {
-            log.err("Command was terminated by signal: {}", .{signal});
-            return error.CommandFailed;
-        },
-        else => {
-            log.err("Command terminated unexpectedly: {}", .{result.term});
-            return error.CommandFailed;
-        },
-    }
+    try utils.handleTerm(&argv, result.term);
 
     return result.stdout;
 }
 
-pub fn findDataset(allocator: std.mem.Allocator, path: []const u8) !Dataset {
-    const zfs_output = try runCommand(allocator);
+pub fn findMountpoint(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    const zfs_output = try runZfsMount(allocator);
     defer allocator.free(zfs_output);
 
     const parsed = try std.json.parseFromSlice(ZfsMountOutput, allocator, zfs_output, .{});
@@ -70,7 +49,7 @@ pub fn findDataset(allocator: std.mem.Allocator, path: []const u8) !Dataset {
     }
 
     // find the dataset with the longest matching mountpoint prefix
-    var best_match: ?*const Dataset = null;
+    var best_match: ?*const ZfsMountOutput.Dataset = null;
     for (datasets) |*dataset| {
         if (std.mem.startsWith(u8, path, dataset.mountpoint)) {
             if (best_match == null or dataset.mountpoint.len > best_match.?.mountpoint.len) {
@@ -78,22 +57,17 @@ pub fn findDataset(allocator: std.mem.Allocator, path: []const u8) !Dataset {
             }
         }
     }
-    if (best_match == null) {
+    if (best_match) |dataset| {
+        log.debugAt(@src(), "Best match for '{s}': {s} mounted at {s}", .{
+            path,
+            dataset.filesystem,
+            dataset.mountpoint,
+        });
+        return allocator.dupe(u8, dataset.mountpoint);
+    } else {
         log.err("No matching dataset found for: {s}", .{path});
         return error.NoMatchFound;
     }
-
-    const dataset = best_match.?;
-    log.debugAt(@src(), "Best match for '{s}': {s} mounted at {s}", .{
-        path,
-        dataset.filesystem,
-        dataset.mountpoint,
-    });
-
-    return .{
-        .filesystem = try allocator.dupe(u8, dataset.filesystem),
-        .mountpoint = try allocator.dupe(u8, dataset.mountpoint),
-    };
 }
 
 test ZfsMountOutput {
