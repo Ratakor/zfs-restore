@@ -24,7 +24,6 @@ const ZfsMountOutput = struct {
 };
 
 pub fn main() !u8 {
-    // TODO: use an arena
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -150,6 +149,7 @@ pub fn main() !u8 {
     var stdout = std.fs.File.stdout().writer(&stdout_buffer);
 
     // TODO: if entries.len == 1 ask a y/N question instead?
+    // TODO: add a way to see the files before restoring?
     var i: usize = entries.len;
     for (entries) |entry| {
         i -= 1;

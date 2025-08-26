@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.15.1",
     .dependencies = .{
         .axe = .{
-            .url = "git+https://github.com/Ratakor/axe#17d09525e14dc17210b360d7a46e2a802aee599f",
-            .hash = "axe-0.7.0-M2JU5WyIAADSGzSjOHTugDCZrPbwU-ttzHvEt0AuVxh7",
+            .url = "git+https://github.com/ratakor/axe#ee0b7f46fee3988844c06bc66038477c8aa86d8d",
+            .hash = "axe-0.7.0-M2JU5ceNAAAsFTeUNNISXldu4sg-3yT3zEBc1-ObTb9W",
         },
         .sizeify = .{
             .url = "git+https://github.com/ratakor/sizeify#22d4a78bf1c9fb97cede4e4a11ad0d5b5bf013a1",

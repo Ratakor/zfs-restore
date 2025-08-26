@@ -7,11 +7,11 @@ pub fn build(b: *std.Build) void {
     const axe = b.dependency("axe", .{
         .target = target,
         .optimize = optimize,
-    });
+    }).module("axe");
     const sizeify = b.dependency("sizeify", .{
         .target = target,
         .optimize = optimize,
-    });
+    }).module("sizeify");
 
     const exe = b.addExecutable(.{
         .name = "zfs_restore",
@@ -20,8 +20,8 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "axe", .module = axe.module("axe") },
-                .{ .name = "sizeify", .module = sizeify.module("sizeify") },
+                .{ .name = "axe", .module = axe },
+                .{ .name = "sizeify", .module = sizeify },
             },
         }),
     });
