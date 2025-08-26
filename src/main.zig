@@ -1,5 +1,6 @@
 const std = @import("std");
 const sizeify = @import("sizeify");
+const zeit = @import("zeit");
 const utils = @import("utils.zig");
 const log = utils.log;
 const zfs = @import("zfs.zig");
@@ -21,6 +22,9 @@ pub fn main() !u8 {
 
     try log.init(allocator, null, &env_map);
     defer log.deinit(allocator);
+
+    const timezone = try zeit.local(allocator, &env_map);
+    defer timezone.deinit();
 
     // TODO: use an arg parser
     ////////////////////////////////////////////////////////////////////////////
@@ -101,20 +105,31 @@ pub fn main() !u8 {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout = std.fs.File.stdout().writer(&stdout_buffer);
 
-    // TODO: add a way to see the files before restoring?
+    // TODO: add a way to see the files before restoring? (see interactive mode)
+
+    // TODO: make it look like eza with a header (& colors)?
+    try stdout.interface.print("Index Date Modified Size    Name\n", .{});
     var it = std.mem.reverseIterator(entries);
     while (it.next()) |entry| {
+        // const time = (zeit.instant(.{
+        //     .source = .{ .unix_nano = entry.mtime },
+        //     .timezone = &timezone,
+        // }) catch unreachable).time();
+        // try stdout.interface.print("{d: <5} ", .{it.index});
+        // try time.strftime(&stdout.interface, "%d %b %H:%M ");
+        // try stdout.interface.print(" {f: <9} {s}\n", .{
+        //     sizeify.fmt(entry.size, .decimal_short),
+        //     entry.name,
+        // });
         try stdout.interface.print("{d: >4} {s} ({f})\n", .{
             it.index,
             entry.name,
-            // TODO: entry.mtime, make it look like eza with a header (& colors)?
             sizeify.fmt(entry.size, .decimal_short),
         });
     }
     try stdout.interface.print("Which version to restore [0..{d}]: ", .{entries.len - 1});
     try stdout.interface.flush();
 
-    // TODO: handle backspace, etc
     var stdin_buffer: [256]u8 = undefined;
     var stdin = std.fs.File.stdin().reader(&stdin_buffer);
     const input = try stdin.interface.takeDelimiterExclusive('\n');
@@ -152,7 +167,7 @@ pub fn main() !u8 {
         return 2;
     }
 
-    try std.fs.Dir.copyFile(snapshot_dir, to_restore.path, cwd, realpath, .{});
+    // try std.fs.Dir.copyFile(snapshot_dir, to_restore.path, cwd, realpath, .{});
 
     return 0;
 }

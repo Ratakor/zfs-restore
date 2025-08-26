@@ -9,8 +9,13 @@
             .hash = "axe-0.7.0-M2JU5ceNAAAsFTeUNNISXldu4sg-3yT3zEBc1-ObTb9W",
         },
         .sizeify = .{
-            .url = "git+https://github.com/ratakor/sizeify#22d4a78bf1c9fb97cede4e4a11ad0d5b5bf013a1",
+            .url = "git+https://github.com/ciathefed/sizeify#0ef93d13a44f231f392c4804ed3b724b3031b8d0",
             .hash = "sizeify-0.0.0-URVFj1EhAAAXtotBNFwEx5W70ygRnAdHjBYcg4F_CahM",
+        },
+        .zeit = .{
+            // keep in sync with axe
+            .url = "git+https://github.com/rockorager/zeit?ref=zig-0.15#ed2ca60db118414bda2b12df2039e33bad3b0b88",
+            .hash = "zeit-0.6.0-5I6bk0J9AgCVa0nnyL0lNY9Xa9F68hHq-ZarhuXNV-Jb",
         },
     },
     .paths = .{

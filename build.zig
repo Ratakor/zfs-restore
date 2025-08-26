@@ -12,6 +12,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     }).module("sizeify");
+    const zeit = b.dependency("zeit", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("zeit");
 
     const exe = b.addExecutable(.{
         .name = "zfs_restore",
@@ -22,6 +26,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "axe", .module = axe },
                 .{ .name = "sizeify", .module = sizeify },
+                .{ .name = "zeit", .module = zeit },
             },
         }),
     });

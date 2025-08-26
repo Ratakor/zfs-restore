@@ -93,7 +93,7 @@ pub fn getSnapshots(
         const stat = try file.stat();
         const gop = if (stat.kind == .file and stat.size <= max_file_size_for_hash) gop: {
             const hash = try computeHash(file);
-            log.debugAt(@src(), "{s}\t{s}", .{ std.fmt.bytesToHex(&hash, .lower), entry.name });
+            // log.debugAt(@src(), "{s}\t{s}", .{ std.fmt.bytesToHex(&hash, .lower), entry.name });
             break :gop try snapshots.map.getOrPut(allocator, &hash);
         } else gop: {
             log.debugAt(@src(), "size: {f}  |  kind: {}  |  {s}", .{
