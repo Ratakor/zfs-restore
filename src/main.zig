@@ -43,12 +43,22 @@ pub fn main() !u8 {
         return 1;
     };
     log.debugAt(@src(), "Input file: {s}", .{filename});
+
+    if (std.fs.cwd().access(filename, .{})) {
+        log.warn("File {s} already exist", .{filename});
+    } else |err| switch (err) {
+        error.FileNotFound => {},
+        else => {
+            log.err("Error accessing file {s}: {}", .{ filename, err });
+            return err;
+        },
+    }
+
     const realpath = blk: {
         // TODO: fix that
         // resolve .. correctly like
         // zfs-restore ../somefile with cwd /home/user
         // should resolve to /home/somefile not /home/user/../somefile
-        // TODO: check & warn if file already exist
         const wd = try std.fs.cwd().realpathAlloc(allocator, ".");
         defer allocator.free(wd);
         break :blk try std.fs.path.join(allocator, &.{ wd, filename });
@@ -126,25 +136,98 @@ pub fn main() !u8 {
         allocator.free(entries);
     }
 
+    if (entries.len == 0) {
+        log.info("No snapshots found for file: {s}", .{realpath});
+        return 0;
+    }
+
     std.mem.sort(snap.SnapshotEntry, entries, {}, snap.SnapshotEntry.oldestFirst);
 
     log.debugAt(@src(), "first entry: {s}", .{entries[0].name});
 
-    // TODO: ask to restore
+    // ask to restore
     var stdout_buffer: [4096]u8 = undefined;
     var stdout = std.fs.File.stdout().writer(&stdout_buffer);
 
-    // TODO: check if entries.items.len == 1 and == 0
+    // TODO: if entries.len == 1 ask a y/N question instead?
     var i: usize = entries.len;
     for (entries) |entry| {
         i -= 1;
-        try stdout.interface.print("{d: >4} {s} {f}\n", .{ i, entry.name, sizeify.fmt(entry.size, .decimal_short), });
+        try stdout.interface.print("{d: >4} {s} ({f})\n", .{
+            i,
+            entry.name,
+            sizeify.fmt(entry.size, .decimal_short),
+        });
     }
-    try stdout.interface.print("What file to restore [0..{d}]: ", .{entries.len});
+    try stdout.interface.print("Which version to restore [0..{d}]: ", .{entries.len - 1});
     try stdout.interface.flush();
 
-    // var stdin = std.fs.File.stdin().reader(&.{});
-    // _ = try stdin.interface.readByte();
+    var stdin_buffer: [256]u8 = undefined;
+    var stdin = std.fs.File.stdin().reader(&stdin_buffer);
+    const input = try stdin.interface.takeDelimiterExclusive('\n');
+    std.log.debug("Input: {s}", .{input});
+
+    const parsed_input = if (input.len == 0) blk: {
+        log.info("No input, defaulting to 0", .{});
+        break :blk 0;
+    } else try std.fmt.parseInt(usize, input, 10);
+
+    if (parsed_input >= entries.len) {
+        log.err("Invalid selection: {d}", .{parsed_input});
+        return 1;
+    }
+
+    const to_restore = &entries[parsed_input];
+    log.debugAt(@src(), "Restoring snapshot: {s}", .{to_restore.path});
+    log.debugAt(@src(), "realpath: {s}", .{realpath});
+
+    // pub fn copyFile(
+    //     source_dir: Dir,
+    //     source_path: []const u8,
+    //     dest_dir: Dir,
+    //     dest_path: []const u8,
+    //     options: CopyFileOptions,
+    // ) CopyFileError!void {
+    //     var file_reader: File.Reader = .init(try source_dir.openFile(source_path, .{}), &.{});
+    //     defer file_reader.file.close();
+
+    //     const mode = options.override_mode orelse blk: {
+    //         const st = try file_reader.file.stat();
+    //         file_reader.size = st.size;
+    //         break :blk st.mode;
+    //     };
+
+    //     var buffer: [1024]u8 = undefined; // Used only when direct fd-to-fd is not available.
+    //     var atomic_file = try dest_dir.atomicFile(dest_path, .{
+    //         .mode = mode,
+    //         .write_buffer = &buffer,
+    //     });
+    //     defer atomic_file.deinit();
+
+    //     _ = atomic_file.file_writer.interface.sendFileAll(&file_reader, .unlimited) catch |err| switch (err) {
+    //         error.ReadFailed => return file_reader.err.?,
+    //         error.WriteFailed => return atomic_file.file_writer.err.?,
+    //     };
+
+    //     try atomic_file.finish();
+    // }
+
+    const snapshot_dirname = try std.fs.path.join(allocator, &.{ dataset.mountpoint, ".zfs", "snapshot" });
+    defer allocator.free(snapshot_dirname);
+    var snapshot_dir = try std.fs.cwd().openDir(snapshot_dirname, .{ .iterate = true });
+    defer snapshot_dir.close();
+
+    const realpath_debug = try std.fmt.allocPrint(allocator, "{s}-debug", .{realpath});
+    defer allocator.free(realpath_debug);
+    log.debugAt(@src(), "realpath_debug: {s}", .{realpath_debug});
+
+    try std.fs.Dir.copyFile(
+        snapshot_dir,
+        to_restore.path, // TODO: then do we need file in SnapshotEntry?
+        std.fs.cwd(),
+        realpath_debug,
+        .{},
+    );
 
     return 0;
 }

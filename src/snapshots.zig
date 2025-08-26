@@ -45,9 +45,9 @@ pub fn getEntries(
 ) ![]SnapshotEntry {
     const relative_path = realpath[mountpoint.len..];
     log.debugAt(@src(), "Relative path: {s}", .{relative_path});
-
     const snapshot_dirname = try std.fs.path.join(allocator, &.{ mountpoint, ".zfs", "snapshot" });
     defer allocator.free(snapshot_dirname);
+    log.debugAt(@src(), "Opening snapshot dir: '{s}'", .{snapshot_dirname});
     var snapshot_dir = try std.fs.cwd().openDir(snapshot_dirname, .{ .iterate = true });
     defer snapshot_dir.close();
 
@@ -83,7 +83,7 @@ pub fn getEntries(
         errdefer file.close();
 
         const hash = try computeHash(file);
-        log.debugAt(@src(), "hash: {s}", .{std.fmt.bytesToHex(&hash, .lower)});
+        // log.debugAt(@src(), "hash: {s}", .{std.fmt.bytesToHex(&hash, .lower)});
         const gop = try map.getOrPut(allocator, &hash);
         if (gop.found_existing) {
             file.close();
