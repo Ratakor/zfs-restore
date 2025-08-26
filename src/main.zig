@@ -2,7 +2,8 @@
 
 const std = @import("std");
 const sizeify = @import("sizeify");
-const log = @import("log.zig").axe;
+const _log = @import("log.zig");
+const log = _log.axe;
 const snap = @import("snapshots.zig");
 
 pub const std_options: std.Options = .{
@@ -28,8 +29,8 @@ pub fn main() !u8 {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    try log.init(allocator, null, null);
-    defer log.deinit(allocator);
+    try _log.init(allocator);
+    defer _log.deinit(allocator);
 
     // TODO: use an arg parser
     var args = try std.process.argsWithAllocator(allocator);

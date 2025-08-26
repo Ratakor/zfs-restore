@@ -12,6 +12,10 @@
             .url = "git+https://github.com/ratakor/sizeify#22d4a78bf1c9fb97cede4e4a11ad0d5b5bf013a1",
             .hash = "sizeify-0.0.0-URVFj1EhAAAXtotBNFwEx5W70ygRnAdHjBYcg4F_CahM",
         },
+        .known_folders = .{
+            .url = "git+https://github.com/ziglibs/known-folders#ab5cf5feb936fa3b72c95d3ad0c0c67791937ba1",
+            .hash = "known_folders-0.0.0-Fy-PJtTTAADUOhGKM0sxzG4eMkNQxRvx9e5dfHVyaeA3",
+        },
     },
     .paths = .{
         "build.zig",
