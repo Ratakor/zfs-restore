@@ -1,4 +1,5 @@
 const std = @import("std");
+const clap = @import("clap");
 const sizeify = @import("sizeify");
 const zeit = @import("zeit");
 const pretty_table = @import("pretty_table.zig");
@@ -10,6 +11,47 @@ const snap = @import("snapshots.zig");
 pub const std_options: std.Options = .{
     .logFn = log.log,
 };
+
+// based on clap.Diagnostic.report
+fn reportBadArg(diag: clap.Diagnostic, err: anyerror) void {
+    var longest = diag.name.longest();
+    if (longest.kind == .positional) {
+        longest.name = diag.arg;
+    }
+
+    switch (err) {
+        clap.streaming.Error.DoesntTakeValue => log.err(
+            "The argument '{s}{s}' does not take a value",
+            .{ longest.kind.prefix(), longest.name },
+        ),
+        clap.streaming.Error.MissingValue => log.err(
+            "The argument '{s}{s}' requires a value but none was supplied",
+            .{ longest.kind.prefix(), longest.name },
+        ),
+        clap.streaming.Error.InvalidArgument => log.err(
+            "Invalid argument '{s}{s}'",
+            .{ longest.kind.prefix(), longest.name },
+        ),
+        else => log.err("Error while parsing arguments: {t}", .{err}),
+    }
+}
+
+fn usage(comptime params: []const clap.Param(clap.Help)) !void {
+    var buffer: [256]u8 = undefined;
+    var stderr = std.fs.File.stderr().writer(&buffer);
+    const writer = &stderr.interface;
+
+    try writer.writeAll("Usage: zfs-restore ");
+    try clap.usage(writer, clap.Help, params);
+    try writer.writeAll("\n\nOptions:\n");
+    try clap.help(writer, clap.Help, params, .{
+        .description_on_new_line = false,
+        .description_indent = 2,
+        .spacing_between_parameters = 0,
+        .indent = 2,
+    });
+    try writer.flush();
+}
 
 pub fn main() !u8 {
     const cwd = std.fs.cwd();
@@ -27,51 +69,62 @@ pub fn main() !u8 {
     const timezone = try zeit.local(allocator, &env_map);
     defer timezone.deinit();
 
-    // TODO: use an arg parser
-    ////////////////////////////////////////////////////////////////////////////
+    const params = comptime clap.parseParamsComptime(
+        \\-h, --help         Display this help and exit.
+        // \\-v, --version      Display version information and exit.
+        // \\-i, --interactive  Interactive mode, open the file in $PAGER before restoring.
+        \\<path>
+        \\
+    );
 
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
+    const parsers = comptime .{
+        .path = clap.parsers.string,
+    };
 
-    var interactive = false;
-
-    _ = args.next(); // progname
-
-    const filename = args.next() orelse {
-        log.err("Usage: zfs-restore <file>", .{});
+    var diag: clap.Diagnostic = .{};
+    var res = clap.parse(clap.Help, &params, parsers, .{
+        .diagnostic = &diag,
+        .allocator = allocator,
+    }) catch |err| {
+        reportBadArg(diag, err);
+        try usage(&params);
         return 1;
     };
-    log.debugAt(@src(), "Input file: {s}", .{filename});
+    defer res.deinit();
 
-    if (args.next()) |extra| {
-        if (std.mem.eql(u8, extra, "-i") or std.mem.eql(u8, extra, "--interactive")) {
-            interactive = true;
-        }
+    if (res.args.help != 0) {
+        try usage(&params);
+        return 0;
     }
 
-    if (cwd.access(filename, .{})) {
-        log.warn("'{s}' already exist", .{filename});
+    // TODO: add a way to see the files before restoring? (see interactive mode)
+    // const interactive = res.args.interactive != 0;
+
+    const input_path = res.positionals[0] orelse {
+        log.err("No path provided", .{});
+        try usage(&params);
+        return 1;
+    };
+    log.debugAt(@src(), "input_path: {s}", .{input_path});
+
+    if (cwd.access(input_path, .{})) {
+        log.warn("'{s}' already exist", .{input_path});
     } else |err| switch (err) {
         error.FileNotFound => {},
-        else => {
-            log.err("Error accessing file '{s}': {t}", .{ filename, err });
-            return 1;
-        },
+        else => return err,
     }
 
-    const realpath = realpath: {
-        if (std.fs.path.isAbsolute(filename)) {
-            break :realpath try std.fs.path.resolve(allocator, &.{filename});
+    const realpath = blk: {
+        if (std.fs.path.isAbsolute(input_path)) {
+            break :blk try std.fs.path.resolve(allocator, &.{input_path});
         }
         // https://stackoverflow.com/questions/72709702/how-do-i-get-the-full-path-of-a-std-fs-dir
         const working_directory = try cwd.realpathAlloc(allocator, ".");
         defer allocator.free(working_directory);
-        break :realpath try std.fs.path.resolve(allocator, &.{ working_directory, filename });
+        break :blk try std.fs.path.resolve(allocator, &.{ working_directory, input_path });
     };
     defer allocator.free(realpath);
     log.debugAt(@src(), "realpath: {s}", .{realpath});
-
-    ////////////////////////////////////////////////////////////////////////////
 
     const mountpoint = try zfs.findMountpoint(allocator, realpath);
     defer allocator.free(mountpoint);
@@ -98,15 +151,9 @@ pub fn main() !u8 {
         return 1;
     }
 
-    std.mem.sort(snap.SnapshotEntry, entries, {}, snap.SnapshotEntry.newestFirst);
-
-    log.debugAt(@src(), "first entry: {s}", .{entries[0].name});
-
     // ask to restore
     var stdout_buffer: [4096]u8 = undefined;
     var stdout = std.fs.File.stdout().writer(&stdout_buffer);
-
-    // TODO: add a way to see the files before restoring? (see interactive mode)
 
     // TODO: add colors
     var table: pretty_table.Table(5) = .{
@@ -177,20 +224,20 @@ pub fn main() !u8 {
         realpath,
     });
 
-    if (interactive) {
-        const pager = env_map.get("PAGER") orelse "less";
-        const argv = [_][]const u8{ pager, to_restore.path };
-        log.debugAt(@src(), "Running `{f}`", .{utils.fmt.join(&argv, " ")});
-        var child: std.process.Child = .init(&argv, allocator);
-        child.cwd_dir = snapshot_dir;
-        child.env_map = &env_map;
-        try child.spawn();
-        // errdefer _ = child.kill() catch {};
-        const term = try child.wait();
-        try utils.handleTerm(&argv, term);
-        log.debugAt(@src(), "TODO: end of interactive mode, exiting...", .{});
-        return 2;
-    }
+    // if (interactive) {
+    //     const pager = env_map.get("PAGER") orelse "less";
+    //     const argv = [_][]const u8{ pager, to_restore.path };
+    //     log.debugAt(@src(), "Running `{f}`", .{utils.fmt.join(&argv, " ")});
+    //     var child: std.process.Child = .init(&argv, allocator);
+    //     child.cwd_dir = snapshot_dir;
+    //     child.env_map = &env_map;
+    //     try child.spawn();
+    //     // errdefer _ = child.kill() catch {};
+    //     const term = try child.wait();
+    //     try utils.handleTerm(&argv, term);
+    //     log.debugAt(@src(), "TODO: end of interactive mode, exiting...", .{});
+    //     return 2;
+    // }
 
     // try std.fs.Dir.copyFile(snapshot_dir, to_restore.path, cwd, realpath, .{});
 

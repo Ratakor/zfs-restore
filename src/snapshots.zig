@@ -1,3 +1,5 @@
+// this should be in zfs.zig
+
 const std = @import("std");
 const sizeify = @import("sizeify");
 const utils = @import("utils.zig");
@@ -12,7 +14,7 @@ pub const Snapshots = struct {
     map: std.StringArrayHashMapUnmanaged(SnapshotEntry) = .empty,
 
     pub fn deinit(self: *Snapshots, allocator: std.mem.Allocator) void {
-        for (self.map.values()) |entry| {
+        for (self.entries()) |entry| {
             entry.deinit(allocator);
         }
         self.map.deinit(allocator);
@@ -138,6 +140,8 @@ pub fn getSnapshots(
         total_snapshots,
         duplicate_entries,
     });
+
+    std.mem.sort(SnapshotEntry, snapshots.entries(), {}, SnapshotEntry.newestFirst);
 
     return snapshots;
 }
