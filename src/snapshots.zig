@@ -28,6 +28,7 @@ pub const SnapshotEntry = struct {
     path: []const u8,
     size: u64,
     mtime: i128,
+    kind: std.fs.File.Kind,
 
     pub fn deinit(self: SnapshotEntry, allocator: std.mem.Allocator) void {
         allocator.free(self.name);
@@ -63,6 +64,13 @@ pub fn getSnapshots(
     var snapshots: Snapshots = .{};
     errdefer snapshots.deinit(allocator);
 
+    var flags: std.posix.O = .{ .ACCMODE = .RDONLY };
+    if (@hasField(std.posix.O, "NOFOLLOW")) flags.NOFOLLOW = true;
+    if (@hasField(std.posix.O, "PATH")) flags.PATH = true;
+    if (@hasField(std.posix.O, "CLOEXEC")) flags.CLOEXEC = true;
+    if (@hasField(std.posix.O, "LARGEFILE")) flags.LARGEFILE = true;
+    log.debugAt(@src(), "flags: {}", .{flags});
+
     var iter = snapshot_dir.iterate();
     var total_snapshots: usize = 0;
     var duplicate_entries: usize = 0;
@@ -74,34 +82,42 @@ pub fn getSnapshots(
 
         const path = try std.fs.path.join(allocator, &.{ entry.name, relative_path });
         errdefer allocator.free(path);
-        const file = snapshot_dir.openFile(path, .{}) catch |err| switch (err) {
+        const fd = std.posix.openat(snapshot_dir.fd, path, flags, 0) catch |err| switch (err) {
             error.FileNotFound => {
                 allocator.free(path);
                 continue;
             },
-            else => {
-                log.err("Error checking snapshot path '{s}/{s}': {t}", .{
-                    snapshot_dirname,
-                    path,
-                    err,
-                });
-                return err;
-            },
+            else => return err,
         };
-        defer file.close();
+        defer std.posix.close(fd);
+        const file: std.fs.File = .{ .handle = fd };
 
         const stat = try file.stat();
-        const gop = if (stat.kind == .file and stat.size <= max_file_size_for_hash) gop: {
-            const hash = try computeHash(file);
-            // log.debugAt(@src(), "{s}\t{s}", .{ std.fmt.bytesToHex(&hash, .lower), entry.name });
-            break :gop try snapshots.map.getOrPut(allocator, &hash);
-        } else gop: {
-            log.debugAt(@src(), "size: {f}  |  kind: {}  |  {s}", .{
-                sizeify.fmt(stat.size, .binary_short),
-                stat.kind,
-                entry.name,
-            });
-            break :gop try snapshots.map.getOrPut(allocator, entry.name);
+        const gop = gop: switch (stat.kind) {
+            .file => if (stat.size <= max_file_size_for_hash) {
+                const hash = try computeHash(file);
+                // log.debugAt(@src(), "{s}\t{s}", .{ std.fmt.bytesToHex(&hash, .lower), entry.name });
+                break :gop try snapshots.map.getOrPut(allocator, &hash);
+            } else {
+                break :gop try snapshots.map.getOrPut(allocator, entry.name);
+            },
+            .sym_link => {
+                // TODO: readlink
+                break :gop try snapshots.map.getOrPut(allocator, entry.name);
+            },
+            .directory => {
+                // TODO: compute directory size?
+                break :gop try snapshots.map.getOrPut(allocator, entry.name);
+            },
+            else => {
+                log.warn("Skipping unsupported entry in '{s}': {s} (kind: {})", .{
+                    snapshot_dirname,
+                    entry.name,
+                    stat.kind,
+                });
+                allocator.free(path);
+                continue;
+            },
         };
         if (gop.found_existing) {
             allocator.free(path);
@@ -112,6 +128,7 @@ pub fn getSnapshots(
                 .path = path,
                 .size = stat.size,
                 .mtime = stat.mtime,
+                .kind = stat.kind,
             };
         }
     }

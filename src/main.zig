@@ -109,18 +109,19 @@ pub fn main() !u8 {
     // TODO: add a way to see the files before restoring? (see interactive mode)
 
     // TODO: add colors
-    var table: pretty_table.Table(4) = .{
-        .header = .{ "Index", "Snapshot Name", "Date Modified", "Size" },
+    var table: pretty_table.Table(5) = .{
+        .header = .{ "Index", "Snapshot Name", "Date Modified", "Size", "Kind" },
         .rows = undefined,
         .mode = .spaced_round,
     };
-    var rows: std.ArrayList([4][]const u8) = .empty;
+    var rows: std.ArrayList([5][]const u8) = .empty;
     defer {
         for (rows.items) |row| {
             allocator.free(row[0]); // Index
             // allocator.free(row[1]); // Name
             allocator.free(row[2]); // Date Modified
             allocator.free(row[3]); // Size
+            // allocator.free(row[4]); // Kind
         }
         rows.deinit(allocator);
     }
@@ -140,6 +141,7 @@ pub fn main() !u8 {
             entry.name,
             try allocator.dupe(u8, writer.buffered()),
             try sizeify.formatAlloc(entry.size, .decimal_short, allocator),
+            @tagName(entry.kind),
         });
 
         // try stdout.interface.print("{d: >4} {s} ({f})\n", .{
