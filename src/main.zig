@@ -38,19 +38,19 @@ fn reportBadArg(diag: clap.Diagnostic, err: anyerror) void {
 
 fn usage(comptime params: []const clap.Param(clap.Help)) !void {
     var buffer: [256]u8 = undefined;
-    var stderr = std.fs.File.stderr().writer(&buffer);
-    const writer = &stderr.interface;
+    var stderr_writter = std.fs.File.stderr().writer(&buffer);
+    const stderr = &stderr_writter.interface;
 
-    try writer.writeAll("Usage: zfs-restore ");
-    try clap.usage(writer, clap.Help, params);
-    try writer.writeAll("\n\nOptions:\n");
-    try clap.help(writer, clap.Help, params, .{
+    try stderr.writeAll("Usage: zfs-restore ");
+    try clap.usage(stderr, clap.Help, params);
+    try stderr.writeAll("\n\nOptions:\n");
+    try clap.help(stderr, clap.Help, params, .{
         .description_on_new_line = false,
         .description_indent = 2,
         .spacing_between_parameters = 0,
         .indent = 2,
     });
-    try writer.flush();
+    try stderr.flush();
 }
 
 pub fn main() !u8 {
@@ -107,13 +107,6 @@ pub fn main() !u8 {
     };
     log.debugAt(@src(), "input_path: {s}", .{input_path});
 
-    if (cwd.access(input_path, .{})) {
-        log.warn("'{s}' already exist", .{input_path});
-    } else |err| switch (err) {
-        error.FileNotFound => {},
-        else => return err,
-    }
-
     const realpath = blk: {
         if (std.fs.path.isAbsolute(input_path)) {
             break :blk try std.fs.path.resolve(allocator, &.{input_path});
@@ -125,6 +118,11 @@ pub fn main() !u8 {
     };
     defer allocator.free(realpath);
     log.debugAt(@src(), "realpath: {s}", .{realpath});
+
+    const path_already_exist = if (cwd.access(realpath, .{})) true else |err| switch (err) {
+        error.FileNotFound => false,
+        else => return err,
+    };
 
     const mountpoint = try zfs.findMountpoint(allocator, realpath);
     defer allocator.free(mountpoint);
@@ -153,7 +151,8 @@ pub fn main() !u8 {
 
     // ask to restore
     var stdout_buffer: [4096]u8 = undefined;
-    var stdout = std.fs.File.stdout().writer(&stdout_buffer);
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
 
     // TODO: add colors
     var table: pretty_table.Table(5) = .{
@@ -190,35 +189,25 @@ pub fn main() !u8 {
             try sizeify.formatAlloc(entry.size, .decimal_short, allocator),
             @tagName(entry.kind),
         });
-
-        // try stdout.interface.print("{d: >4} {s} ({f})\n", .{
-        //     it.index,
-        //     entry.name,
-        //     sizeify.fmt(entry.size, .decimal_short),
-        // });
     }
     table.rows = rows.items;
-    try stdout.interface.print("{f}", .{table});
-    try stdout.interface.print("Which version to restore [0..{d}]: ", .{entries.len - 1});
-    try stdout.interface.flush();
+    try stdout.print("{f}", .{table});
+    try stdout.print("Which version to restore [0..{d}]: ", .{entries.len - 1});
+    try stdout.flush();
 
-    var stdin_buffer: [256]u8 = undefined;
-    var stdin = std.fs.File.stdin().reader(&stdin_buffer);
-    const input = try stdin.interface.takeDelimiterExclusive('\n');
-    log.debugAt(@src(), "Input: {s}", .{input});
+    var stdin_buffer: [32]u8 = undefined;
+    var stdin_reader = std.fs.File.stdin().reader(&stdin_buffer);
+    const stdin = &stdin_reader.interface;
+    const input = try stdin.takeDelimiterExclusive('\n');
+    log.debugAt(@src(), "input: {s}", .{input});
 
-    const parsed_input = if (input.len == 0) blk: {
-        log.info("No input, defaulting to 0", .{});
-        break :blk 0;
-    } else try std.fmt.parseInt(usize, input, 10);
-
+    const parsed_input = if (input.len == 0) 0 else try std.fmt.parseInt(usize, input, 10);
     if (parsed_input >= entries.len) {
         log.err("Invalid selection: {d}", .{parsed_input});
         return 1;
     }
 
     const to_restore = &entries[parsed_input];
-    log.debugAt(@src(), "Restoring snapshot: {s}", .{to_restore.name});
     log.debugAt(@src(), "{f} -> {s}", .{
         utils.fmt.join(&.{ snapshot_dirname, to_restore.path }, std.fs.path.sep_str),
         realpath,
@@ -235,11 +224,24 @@ pub fn main() !u8 {
     //     // errdefer _ = child.kill() catch {};
     //     const term = try child.wait();
     //     try utils.handleTerm(&argv, term);
-    //     log.debugAt(@src(), "TODO: end of interactive mode, exiting...", .{});
+    //     log.debugAt(@src(), "end of interactive mode, exiting...", .{});
     //     return 2;
     // }
 
-    // try std.fs.Dir.copyFile(snapshot_dir, to_restore.path, cwd, realpath, .{});
+    if (path_already_exist) {
+        log.warn("'{s}' already exist", .{realpath});
+        try stdout.writeAll("Overwrite? [y/N]: ");
+        try stdout.flush();
+        const confirm = try stdin.takeDelimiterExclusive('\n');
+        log.debugAt(@src(), "confirm: {s}", .{confirm});
+        if (confirm.len == 0 or !std.ascii.startsWithIgnoreCase("yes", confirm)) {
+            log.info("Aborting...", .{});
+            return 0;
+        }
+    }
+
+    log.info("Restoring snapshot: {s}", .{to_restore.name});
+    try std.fs.Dir.copyFile(snapshot_dir, to_restore.path, cwd, realpath, .{});
 
     return 0;
 }
