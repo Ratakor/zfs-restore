@@ -1,6 +1,7 @@
 const std = @import("std");
 const sizeify = @import("sizeify");
 const zeit = @import("zeit");
+const pretty_table = @import("pretty_table.zig");
 const utils = @import("utils.zig");
 const log = utils.log;
 const zfs = @import("zfs.zig");
@@ -107,26 +108,48 @@ pub fn main() !u8 {
 
     // TODO: add a way to see the files before restoring? (see interactive mode)
 
-    // TODO: make it look like eza with a header (& colors)?
-    try stdout.interface.print("Index Date Modified Size    Name\n", .{});
+    // TODO: add colors
+    var table: pretty_table.Table(4) = .{
+        .header = .{ "Index", "Snapshot Name", "Date Modified", "Size" },
+        .rows = undefined,
+        .mode = .spaced_round,
+    };
+    var rows: std.ArrayList([4][]const u8) = .empty;
+    defer {
+        for (rows.items) |row| {
+            allocator.free(row[0]); // Index
+            // allocator.free(row[1]); // Name
+            allocator.free(row[2]); // Date Modified
+            allocator.free(row[3]); // Size
+        }
+        rows.deinit(allocator);
+    }
+
     var it = std.mem.reverseIterator(entries);
     while (it.next()) |entry| {
-        // const time = (zeit.instant(.{
-        //     .source = .{ .unix_nano = entry.mtime },
-        //     .timezone = &timezone,
-        // }) catch unreachable).time();
-        // try stdout.interface.print("{d: <5} ", .{it.index});
-        // try time.strftime(&stdout.interface, "%d %b %H:%M ");
-        // try stdout.interface.print(" {f: <9} {s}\n", .{
-        //     sizeify.fmt(entry.size, .decimal_short),
-        //     entry.name,
-        // });
-        try stdout.interface.print("{d: >4} {s} ({f})\n", .{
-            it.index,
+        const time = (try zeit.instant(.{
+            .source = .{ .unix_nano = entry.mtime },
+            .timezone = &timezone,
+        })).time();
+        var buffer: [32]u8 = undefined;
+        var writer = std.Io.Writer.fixed(&buffer);
+        try time.strftime(&writer, "%d %b %H:%M");
+
+        try rows.append(allocator, .{
+            try std.fmt.allocPrint(allocator, "{d: >4}", .{it.index}),
             entry.name,
-            sizeify.fmt(entry.size, .decimal_short),
+            try allocator.dupe(u8, writer.buffered()),
+            try sizeify.formatAlloc(entry.size, .decimal_short, allocator),
         });
+
+        // try stdout.interface.print("{d: >4} {s} ({f})\n", .{
+        //     it.index,
+        //     entry.name,
+        //     sizeify.fmt(entry.size, .decimal_short),
+        // });
     }
+    table.rows = rows.items;
+    try stdout.interface.print("{f}", .{table});
     try stdout.interface.print("Which version to restore [0..{d}]: ", .{entries.len - 1});
     try stdout.interface.flush();
 

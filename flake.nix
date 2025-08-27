@@ -1,5 +1,5 @@
 {
-  description = "TODO";
+  description = "A CLI tool to restore files from ZFS snapshots";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -41,10 +41,21 @@
       default = zig.packages.${system}.${zig-version}.makePackage {
         pname = "zfs-restore";
         version = "0.0.0";
+
         src = ./.;
-        zigReleaseMode = "safe";
-        depsHash = "sha256-T39rEuZ1T7jmgOhZHF+X0sNyRsSZgFxakqWroFXVpqA=";
+        zigReleaseMode = "fast";
+        depsHash = "sha256-bQrdwc+ZD2tq9ZHeU/eNh9F/+Vw3Xsq1NoG8lPMJBII=";
+
         buildInputs = [pkgs.zfs];
+
+        meta = with pkgs.lib; {
+          description = "A CLI tool to restore files from ZFS snapshots";
+          homepage = "https://github.com/ratakor/zfs-restore";
+          license = licenses.eupl12;
+          # maintainers = [];
+          # platforms = platforms.linux;
+          mainProgram = "zfs-restore";
+        };
       };
     });
   };
