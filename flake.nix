@@ -5,15 +5,16 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     zig = {
-      url = "github:silversquirl/zig-flake/compat";
+      url = "github:silversquirl/zig-flake";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     zls = {
-      url = "github:zigtools/zls";
+      # https://github.com/zigtools/zls/pull/2469
+      url = "github:Ratakor/zls/older-versions";
       inputs = {
         nixpkgs.follows = "nixpkgs";
-        zig-overlay.follows = "zig";
+        zig-flake.follows = "zig";
       };
     };
   };
@@ -24,36 +25,36 @@
     zls,
     ...
   }: let
-    zig-version = "0.15.1";
     forAllSystems = f: builtins.mapAttrs f nixpkgs.legacyPackages;
   in {
     devShells = forAllSystems (system: pkgs: {
       default = pkgs.mkShellNoCC {
         packages = [
           pkgs.bash
-          zig.packages.${system}.${zig-version}
-          zls.packages.${system}.default
+          zig.packages.${system}.zig_0_15_1
+          zls.packages.${system}.zls_0_15_0
         ];
       };
     });
 
     packages = forAllSystems (system: pkgs: {
-      default = zig.packages.${system}.${zig-version}.makePackage {
+      default = zig.packages.${system}.zig_0_15_1.makePackage {
         pname = "zfs-restore";
         version = "0.0.0";
 
         src = ./.;
         zigReleaseMode = "fast";
-        depsHash = "sha256-bQrdwc+ZD2tq9ZHeU/eNh9F/+Vw3Xsq1NoG8lPMJBII=";
+        depsHash = "sha256-jF/wi+CVsGbjjOgYIdR7S0nMitqgjcTnNrswQBKGjBE=";
 
-        buildInputs = [pkgs.zfs];
+        buildInputs = with pkgs; [
+          zfs
+          coreutils
+        ];
 
         meta = with pkgs.lib; {
           description = "A CLI tool to restore files from ZFS snapshots";
           homepage = "https://github.com/ratakor/zfs-restore";
           license = licenses.eupl12;
-          # maintainers = [];
-          # platforms = platforms.linux;
           mainProgram = "zfs-restore";
         };
       };
