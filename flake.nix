@@ -29,10 +29,15 @@
   in {
     devShells = forAllSystems (system: pkgs: {
       default = pkgs.mkShellNoCC {
-        packages = [
-          pkgs.bash
+        packages = with pkgs; [
+          bash
           zig.packages.${system}.zig_0_15_1
           zls.packages.${system}.zls_0_15_0
+
+          # `zig build release` dependencies
+          gnutar
+          xz
+          p7zip
         ];
       };
     });
