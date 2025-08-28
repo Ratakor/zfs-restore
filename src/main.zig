@@ -178,14 +178,21 @@ pub fn main() !u8 {
             .timezone = &timezone,
         })).time();
         var buffer: [32]u8 = undefined;
-        var writer = std.Io.Writer.fixed(&buffer);
-        try time.strftime(&writer, "%d %b %H:%M");
+        var time_writer = std.Io.Writer.fixed(&buffer);
+        try time.strftime(&time_writer, "%d %b %H:%M");
+
+        // const size = switch (entry.kind) {
+        //     .file => try sizeify.formatAlloc(entry.size, .decimal_short, allocator),
+        //     .sym_link => try allocator.dupe(u8, "-"),
+        //     .directory => try std.fmt.allocPrint(allocator, "{d} files", .{entry.size}),
+        //     else => unreachable,
+        // };
 
         try rows.append(allocator, .{
             try std.fmt.allocPrint(allocator, "{d: >4}", .{it.index}),
             entry.name,
-            try allocator.dupe(u8, writer.buffered()),
-            try sizeify.formatAlloc(entry.size, .decimal_short, allocator),
+            try allocator.dupe(u8, time_writer.buffered()),
+            try sizeify.formatAlloc(entry.size, .decimal_short, allocator), // size,
             @tagName(entry.kind),
         });
     }

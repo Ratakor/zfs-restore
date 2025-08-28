@@ -119,11 +119,9 @@ pub fn getSnapshots(
     errdefer snapshots.deinit(allocator);
 
     const flags: std.posix.O = .{
-        .ACCMODE = .RDONLY,
-        .NOFOLLOW = true, // do not follow symlinks
         .PATH = true, // record only the target path in the opened descriptor
+        .NOFOLLOW = true, // do not follow symlinks
         .CLOEXEC = true, // automatically close file on execve(2)
-        .NOCTTY = true, // do not assign a controlling terminal
     };
     log.debugAt(@src(), "flags: {}", .{flags});
 
@@ -159,11 +157,23 @@ pub fn getSnapshots(
                 break :gop try snapshots.map.getOrPut(allocator, entry.name);
             },
             .sym_link => {
-                // TODO: readlink to get target and use it as key
-                break :gop try snapshots.map.getOrPut(allocator, entry.name);
+                var buffer: [4096]u8 = undefined;
+                const key = try snapshot_dir.readLink(path, &buffer);
+                // log.debugAt(@src(), "Symlink {s} -> {s}", .{ entry.name, key });
+                break :gop try snapshots.map.getOrPut(allocator, key);
             },
             .directory => {
-                // TODO: compute directory size?
+                // compute directory size?
+                // no, even counting amount of entries is too slow and it
+                // doesn't help removing duplicates
+
+                // var dir = try snapshot_dir.openDir(path, .{ .iterate = true });
+                // defer dir.close();
+                // var walker = try dir.walk(allocator);
+                // defer walker.deinit();
+                // var count: usize = 0;
+                // while (try walker.next()) |_| count += 1;
+                // stat.size = count;
                 break :gop try snapshots.map.getOrPut(allocator, entry.name);
             },
             else => {
