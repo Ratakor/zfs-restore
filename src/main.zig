@@ -241,7 +241,21 @@ pub fn main() !u8 {
     }
 
     log.info("Restoring snapshot: {s}", .{to_restore.name});
-    try std.fs.Dir.copyFile(snapshot_dir, to_restore.path, cwd, realpath, .{});
+    // cp ftw
+    const to_restore_full_path = try std.fs.path.join(allocator, &.{ snapshot_dirname, to_restore.path });
+    defer allocator.free(to_restore_full_path);
+    const cp_argv = [_][]const u8{ "cp", "-a", "--", to_restore_full_path, realpath };
+    log.debugAt(@src(), "Running `{f}`", .{utils.fmt.join(&cp_argv, " ")});
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &cp_argv,
+        .cwd_dir = cwd,
+        .env_map = &env_map,
+    });
+    log.debugAt(@src(), "stdout: {s}", .{result.stdout});
+    log.debugAt(@src(), "stderr: {s}", .{result.stderr});
+    try utils.handleTerm(&cp_argv, result.term);
+    // try std.fs.Dir.copyFile(snapshot_dir, to_restore.path, cwd, realpath, .{});
 
     return 0;
 }
