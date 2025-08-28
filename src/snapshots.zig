@@ -8,8 +8,6 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 
 const max_file_size_for_hash = 10 * 1024 * 1024; // 10 MB
 
-// TODO: handle restoring directories
-
 pub const Snapshots = struct {
     map: std.StringArrayHashMapUnmanaged(SnapshotEntry) = .empty,
 
@@ -66,11 +64,13 @@ pub fn getSnapshots(
     var snapshots: Snapshots = .{};
     errdefer snapshots.deinit(allocator);
 
-    var flags: std.posix.O = .{ .ACCMODE = .RDONLY };
-    if (@hasField(std.posix.O, "NOFOLLOW")) flags.NOFOLLOW = true;
-    if (@hasField(std.posix.O, "PATH")) flags.PATH = true;
-    if (@hasField(std.posix.O, "CLOEXEC")) flags.CLOEXEC = true;
-    if (@hasField(std.posix.O, "LARGEFILE")) flags.LARGEFILE = true;
+    const flags: std.posix.O = .{
+        .ACCMODE = .RDONLY,
+        .NOFOLLOW = true, // do not follow symlinks
+        .PATH = true, // record only the target path in the opened descriptor
+        .CLOEXEC = true, // automatically close file on execve(2)
+        .NOCTTY = true, // do not assign a controlling terminal
+    };
     log.debugAt(@src(), "flags: {}", .{flags});
 
     var iter = snapshot_dir.iterate();
@@ -92,11 +92,12 @@ pub fn getSnapshots(
             else => return err,
         };
         defer std.posix.close(fd);
-        const file: std.fs.File = .{ .handle = fd };
 
-        const stat = try file.stat();
+        const stat = try std.fs.File.stat(.{ .handle = fd });
         const gop = gop: switch (stat.kind) {
             .file => if (stat.size <= max_file_size_for_hash) {
+                const file = try snapshot_dir.openFile(path, .{});
+                defer file.close();
                 const hash = try computeHash(file);
                 // log.debugAt(@src(), "{s}\t{s}", .{ std.fmt.bytesToHex(&hash, .lower), entry.name });
                 break :gop try snapshots.map.getOrPut(allocator, &hash);
@@ -104,7 +105,7 @@ pub fn getSnapshots(
                 break :gop try snapshots.map.getOrPut(allocator, entry.name);
             },
             .sym_link => {
-                // TODO: readlink
+                // TODO: readlink to get target and use it as key
                 break :gop try snapshots.map.getOrPut(allocator, entry.name);
             },
             .directory => {
@@ -112,11 +113,7 @@ pub fn getSnapshots(
                 break :gop try snapshots.map.getOrPut(allocator, entry.name);
             },
             else => {
-                log.warn("Skipping unsupported entry in '{s}': {s} (kind: {})", .{
-                    snapshot_dirname,
-                    entry.name,
-                    stat.kind,
-                });
+                log.warn("Skipping unsupported entry: {s} (kind: {})", .{ entry.name, stat.kind });
                 allocator.free(path);
                 continue;
             },
