@@ -1,4 +1,5 @@
 const std = @import("std");
+const Sha256 = std.crypto.hash.sha2.Sha256;
 
 // See https://github.com/Ratakor/zfs-restore/commit/fb7f63d8a739b9ee5f025288d0f36966184a47ec
 // for file logging.
@@ -43,4 +44,15 @@ pub fn handleTerm(argv: []const []const u8, term: std.process.Child.Term) !void 
             return error.CommandFailed;
         },
     }
+}
+
+pub fn computeFileHash(file: std.fs.File) ![Sha256.digest_length]u8 {
+    var sha256 = Sha256.init(.{});
+    var buffer: [4096]u8 = undefined;
+    var n = try file.read(&buffer);
+    while (n != 0) {
+        sha256.update(buffer[0..n]);
+        n = try file.read(&buffer);
+    }
+    return sha256.finalResult();
 }

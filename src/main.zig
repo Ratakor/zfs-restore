@@ -6,7 +6,6 @@ const pretty_table = @import("pretty_table.zig");
 const utils = @import("utils.zig");
 const log = utils.log;
 const zfs = @import("zfs.zig");
-const snap = @import("snapshots.zig");
 
 pub const std_options: std.Options = .{
     .logFn = log.log,
@@ -135,7 +134,7 @@ pub fn main() !u8 {
     var snapshot_dir = try cwd.openDir(snapshot_dirname, .{ .iterate = true });
     defer snapshot_dir.close();
 
-    var snapshots = try snap.getSnapshots(
+    var snapshots = try zfs.getSnapshots(
         allocator,
         relative_path,
         snapshot_dirname,
