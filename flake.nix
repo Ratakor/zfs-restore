@@ -40,7 +40,7 @@
     packages = forAllSystems (system: pkgs: {
       default = zig.packages.${system}.zig_0_15_1.makePackage {
         pname = "zfs-restore";
-        version = "0.0.0";
+        version = "0.1.0";
 
         src = ./.;
         zigReleaseMode = "fast";
