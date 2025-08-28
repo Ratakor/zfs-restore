@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
     }).module("clap");
 
     const exe = b.addExecutable(.{
-        .name = "zfs_restore",
+        .name = "zfs-restore",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,

@@ -46,10 +46,19 @@
         zigReleaseMode = "fast";
         depsHash = "sha256-jF/wi+CVsGbjjOgYIdR7S0nMitqgjcTnNrswQBKGjBE=";
 
+        nativeBuildInputs = with pkgs; [
+          makeWrapper
+        ];
+
         buildInputs = with pkgs; [
           zfs
           coreutils
         ];
+
+        postInstall = with pkgs; ''
+          wrapProgram $out/bin/zfs-restore \
+            --prefix PATH : ${lib.makeBinPath [zfs coreutils]}
+        '';
 
         meta = with pkgs.lib; {
           description = "A CLI tool to restore files from ZFS snapshots";

@@ -37,8 +37,8 @@ fn reportBadArg(diag: clap.Diagnostic, err: anyerror) void {
 
 fn usage(comptime params: []const clap.Param(clap.Help)) !void {
     var buffer: [256]u8 = undefined;
-    var stderr_writter = std.fs.File.stderr().writer(&buffer);
-    const stderr = &stderr_writter.interface;
+    var stderr_writer = std.fs.File.stderr().writer(&buffer);
+    const stderr = &stderr_writer.interface;
 
     try stderr.writeAll("Usage: zfs-restore ");
     try clap.usage(stderr, clap.Help, params);
@@ -96,7 +96,10 @@ pub fn main() !u8 {
         return 0;
     }
 
-    // TODO: add a way to see the files before restoring? (see interactive mode)
+    // TODO: interactive mode
+    // - add a way to see the files before restoring
+    // - add a way to see directory via $FILE_MANAGER or something
+    // - add a way to see symlink target
     // const interactive = res.args.interactive != 0;
 
     const input_path = res.positionals[0] orelse {
