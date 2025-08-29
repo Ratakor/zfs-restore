@@ -1,4 +1,5 @@
 const std = @import("std");
+const build_options = @import("build_options");
 const clap = @import("clap");
 const sizeify = @import("sizeify");
 const zeit = @import("zeit");
@@ -70,7 +71,7 @@ pub fn main() !u8 {
 
     const params = comptime clap.parseParamsComptime(
         \\-h, --help         Display this help and exit.
-        // \\-v, --version      Display version information and exit.
+        \\-v, --version      Display version information and exit.
         // \\-i, --interactive  Interactive mode, open the file in $PAGER before restoring.
         \\<path>
         \\
@@ -93,6 +94,11 @@ pub fn main() !u8 {
 
     if (res.args.help != 0) {
         try usage(&params);
+        return 0;
+    }
+
+    if (res.args.version != 0) {
+        try std.fs.File.stdout().writeAll(build_options.version_string ++ "\n");
         return 0;
     }
 

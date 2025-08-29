@@ -8,6 +8,7 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 // prefer to keep the custom std_options rather than having a probably useless
 // log file.
 pub const log = @import("axe").Axe(.{
+    .scope_format = "@%",
     .mutex = .{ .function = .progress_stderr },
 });
 

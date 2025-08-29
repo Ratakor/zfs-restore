@@ -12,10 +12,11 @@ Like [trash-restore](https://github.com/andreafrancia/trash-cli) but for zfs sna
 ## Usage
 
 ```sh
-Usage: zfs-restore [-h] <path>
+Usage: zfs-restore [-hv] <path>
 
 Options:
-  -h, --help    Display this help and exit.
+  -h, --help       Display this help and exit.
+  -v, --version    Display version information and exit.
   <path>
 ```
 
