@@ -3,6 +3,7 @@ const build_options = @import("build_options");
 const clap = @import("clap");
 const sizeify = @import("sizeify");
 const zeit = @import("zeit");
+const axe = @import("axe");
 const pretty_table = @import("pretty_table.zig");
 const utils = @import("utils.zig");
 const log = utils.log;
@@ -70,15 +71,20 @@ pub fn main() !u8 {
     defer timezone.deinit();
 
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help         Display this help and exit.
-        \\-v, --version      Display version information and exit.
-        // \\-i, --interactive  Interactive mode, open the file in $PAGER before restoring.
-        \\<path>
+        \\-h, --help            Display this help and exit
+        \\-v, --version         Display version information and exit
+        \\-s, --sort <FIELD>    Which field to sort by (name, date, size)
+        \\-r, --reverse         Reverse the sort order of the snapshots
+        \\    --color <WHEN>    When to use terminal colors (always, never, auto)
+        // \\-i, --interactive     Interactive mode, open the file in $PAGER before restoring
+        \\<PATH>
         \\
     );
 
     const parsers = comptime .{
-        .path = clap.parsers.string,
+        .PATH = clap.parsers.string,
+        .WHEN = clap.parsers.enumeration(axe.Color),
+        .FIELD = clap.parsers.enumeration(zfs.Snapshots.SortFieldWithAliases),
     };
 
     var diag: clap.Diagnostic = .{};
@@ -92,6 +98,17 @@ pub fn main() !u8 {
     };
     defer res.deinit();
 
+    var stdout_tty_config: std.Io.tty.Config = .detect(.stdout());
+    if (res.args.color) |color| {
+        switch (color) {
+            .always => stdout_tty_config = .escape_codes, // no support for windows
+            .never => stdout_tty_config = .no_color,
+            .auto => {}, // already detected
+        }
+        log.updateTtyConfig(color);
+        log.debugAt(@src(), "color: {t}", .{color});
+    }
+
     if (res.args.help != 0) {
         try usage(&params);
         return 0;
@@ -101,6 +118,11 @@ pub fn main() !u8 {
         try std.fs.File.stdout().writeAll(build_options.version_string ++ "\n");
         return 0;
     }
+
+    const sorting_field: zfs.Snapshots.SortField = if (res.args.sort) |field| field.parse() else .date;
+    log.debugAt(@src(), "sorting_field: {t}", .{sorting_field});
+    const reverse_sort = res.args.reverse != 0;
+    log.debugAt(@src(), "reverse_sort: {}", .{reverse_sort});
 
     // TODO: interactive mode
     // - add a way to see the files before restoring
@@ -157,31 +179,61 @@ pub fn main() !u8 {
         return 1;
     }
 
+    // std.mem.sort takes a comptime function
+    switch (sorting_field) {
+        .name => if (reverse_sort) {
+            log.debugAt(@src(), "Sorting snapshots by name (Z-A)", .{});
+            std.mem.sort(zfs.Snapshots.Entry, entries, {}, zfs.Snapshots.byNameZA);
+        } else {
+            log.debugAt(@src(), "Sorting snapshots by name (A-Z)", .{});
+            std.mem.sort(zfs.Snapshots.Entry, entries, {}, zfs.Snapshots.byNameAZ);
+        },
+        .date => if (reverse_sort) {
+            log.debugAt(@src(), "Sorting snapshots by date (oldest first)", .{});
+            std.mem.sort(zfs.Snapshots.Entry, entries, {}, zfs.Snapshots.oldestFirst);
+        } else {
+            log.debugAt(@src(), "Sorting snapshots by date (newest first)", .{});
+            std.mem.sort(zfs.Snapshots.Entry, entries, {}, zfs.Snapshots.newestFirst);
+        },
+        .size => if (reverse_sort) {
+            log.debugAt(@src(), "Sorting snapshots by size (smallest first)", .{});
+            std.mem.sort(zfs.Snapshots.Entry, entries, {}, zfs.Snapshots.smallestFirst);
+        } else {
+            log.debugAt(@src(), "Sorting snapshots by size (largest first)", .{});
+            std.mem.sort(zfs.Snapshots.Entry, entries, {}, zfs.Snapshots.largestFirst);
+        },
+    }
+
     // ask to restore
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
     const stdout = &stdout_writer.interface;
 
-    // TODO: add colors
     var table: pretty_table.Table(5) = .{
-        .header = .{ "Index", "Snapshot Name", "Date Modified", "Size", "Kind" },
+        .header = .{
+            .{ .string = "Index" },
+            .{ .string = "Snapshot Name" },
+            .{ .string = "Date Modified" },
+            .{ .string = "Size" },
+            .{ .string = "Kind" },
+        },
         .rows = undefined,
         .mode = .spaced_round,
+        .tty_config = stdout_tty_config,
     };
-    var rows: std.ArrayList([5][]const u8) = .empty;
+    var rows: std.ArrayList(pretty_table.Row(5)) = .empty;
     defer {
         for (rows.items) |row| {
-            allocator.free(row[0]); // Index
-            // allocator.free(row[1]); // Name
-            allocator.free(row[2]); // Date Modified
-            allocator.free(row[3]); // Size
-            // allocator.free(row[4]); // Kind
+            allocator.free(row[0].string); // Index
+            // allocator.free(row[1].string); // Name
+            allocator.free(row[2].string); // Date Modified
+            allocator.free(row[3].string); // Size
+            // allocator.free(row[4].string); // Kind
         }
         rows.deinit(allocator);
     }
 
-    var it = std.mem.reverseIterator(entries);
-    while (it.next()) |entry| {
+    for (entries, 0..) |entry, index| {
         const time = (try zeit.instant(.{
             .source = .{ .unix_nano = entry.mtime },
             .timezone = &timezone,
@@ -198,11 +250,11 @@ pub fn main() !u8 {
         // };
 
         try rows.append(allocator, .{
-            try std.fmt.allocPrint(allocator, "{d: >4}", .{it.index}),
-            entry.name,
-            try allocator.dupe(u8, time_writer.buffered()),
-            try sizeify.formatAlloc(entry.size, .decimal_short, allocator), // size,
-            @tagName(entry.kind),
+            .{ .string = try std.fmt.allocPrint(allocator, "{d: >4}", .{index}), .color = .bright_black },
+            .{ .string = entry.name },
+            .{ .string = try allocator.dupe(u8, time_writer.buffered()), .color = .blue },
+            .{ .string = try sizeify.formatAlloc(entry.size, .decimal_short, allocator), .color = .green },
+            .{ .string = @tagName(entry.kind), .color = .magenta },
         });
     }
     table.rows = rows.items;

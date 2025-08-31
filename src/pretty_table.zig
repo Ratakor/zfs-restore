@@ -1,5 +1,5 @@
 // https://github.com/jiacai2050/zigcli/blob/main/src/mod/pretty-table.zig
-// modified
+// Modifications under the same license as the rest of the zfs-restore project.
 //
 // MIT License
 //
@@ -26,8 +26,12 @@
 const std = @import("std");
 
 pub const String = []const u8;
+pub const Col = struct {
+    string: String,
+    color: ?std.Io.tty.Color = null,
+};
 pub fn Row(comptime num: usize) type {
-    return [num]String;
+    return [num]Col;
 }
 
 pub const Separator = struct {
@@ -123,6 +127,7 @@ pub fn Table(comptime len: usize) type {
         rows: []const Row(len),
         mode: Separator.Mode = .ascii,
         padding: usize = 0,
+        tty_config: std.Io.tty.Config = .no_color,
 
         const Self = @This();
 
@@ -147,7 +152,7 @@ pub fn Table(comptime len: usize) type {
         fn writeRow(
             self: Self,
             writer: *std.io.Writer,
-            row: []const String,
+            row: []const Col,
             col_lens: [len]usize,
         ) !void {
             const m = self.mode;
@@ -159,9 +164,15 @@ pub fn Table(comptime len: usize) type {
                     try writer.writeAll(Separator.get(m, .Text, .Sep));
                 }
 
-                try writer.writeAll(column);
+                if (column.color) |c| {
+                    try self.setColor(writer, c);
+                    try writer.writeAll(column.string);
+                    try self.setColor(writer, .reset);
+                } else {
+                    try writer.writeAll(column.string);
+                }
 
-                const left: usize = col_len - column.len;
+                const left: usize = col_len - column.string.len;
                 for (0..left) |_| {
                     try writer.writeAll(" ");
                 }
@@ -174,19 +185,19 @@ pub fn Table(comptime len: usize) type {
             var lens = std.mem.zeroes([len]usize);
             if (self.header) |header| {
                 for (header, &lens) |column, *n| {
-                    n.* = column.len;
+                    n.* = column.string.len;
                 }
             }
 
             for (self.rows) |row| {
                 for (row, &lens) |col, *n| {
-                    n.* = @max(col.len, n.*);
+                    n.* = @max(col.string.len, n.*);
                 }
             }
 
             if (self.footer) |footer| {
                 for (footer, &lens) |col, *n| {
-                    n.* = @max(col.len, n.*);
+                    n.* = @max(col.string.len, n.*);
                 }
             }
 
@@ -194,6 +205,10 @@ pub fn Table(comptime len: usize) type {
                 n.* += self.padding;
             }
             return lens;
+        }
+
+        fn setColor(self: Self, writer: *std.Io.Writer, color: std.Io.tty.Color) std.Io.Writer.Error!void {
+            self.tty_config.setColor(writer, color) catch return std.Io.Writer.Error.WriteFailed;
         }
 
         pub fn format(

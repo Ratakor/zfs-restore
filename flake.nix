@@ -20,6 +20,7 @@
   };
 
   outputs = {
+    self,
     nixpkgs,
     zig,
     zls,
@@ -29,6 +30,8 @@
   in {
     devShells = forAllSystems (system: pkgs: {
       default = pkgs.mkShellNoCC {
+        inherit (self.packages.${system}.default) nativeBuildInputs buildInputs;
+
         packages = with pkgs; [
           git
           bash

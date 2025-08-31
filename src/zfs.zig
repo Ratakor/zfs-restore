@@ -32,12 +32,49 @@ pub const Snapshots = struct {
         return self.map.values();
     }
 
+    pub const SortFieldWithAliases = enum {
+        name,
+        size,
+        date,
+        time,
+        mtime,
+
+        pub fn parse(self: @This()) SortField {
+            return switch (self) {
+                .name => .name,
+                .size => .size,
+                .date, .time, .mtime => .date,
+            };
+        }
+    };
+
+    pub const SortField = enum { name, size, date };
+
+    // sort functions to be used with std.mem.sort
+    // naming is terrible
+
     pub fn newestFirst(_: void, lhs: Entry, rhs: Entry) bool {
         return lhs.mtime > rhs.mtime;
     }
 
     pub fn oldestFirst(_: void, lhs: Entry, rhs: Entry) bool {
         return lhs.mtime < rhs.mtime;
+    }
+
+    pub fn largestFirst(_: void, lhs: Entry, rhs: Entry) bool {
+        return lhs.size > rhs.size;
+    }
+
+    pub fn smallestFirst(_: void, lhs: Entry, rhs: Entry) bool {
+        return lhs.size < rhs.size;
+    }
+
+    pub fn byNameAZ(_: void, lhs: Entry, rhs: Entry) bool {
+        return std.ascii.orderIgnoreCase(lhs.name, rhs.name) == .lt;
+    }
+
+    pub fn byNameZA(_: void, lhs: Entry, rhs: Entry) bool {
+        return std.ascii.orderIgnoreCase(lhs.name, rhs.name) == .gt;
     }
 };
 
@@ -201,8 +238,6 @@ pub fn getSnapshots(
         total_snapshots,
         duplicate_entries,
     });
-
-    std.mem.sort(Snapshots.Entry, snapshots.entries(), {}, Snapshots.newestFirst);
 
     return snapshots;
 }
