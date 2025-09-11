@@ -1,13 +1,15 @@
 {
   lib,
-  zigPlatform,
+  stdenv,
+  callPackage,
   makeWrapper,
+  zig,
   zfs,
   coreutils,
 }: let
   fs = lib.fileset;
 in
-  zigPlatform.makePackage {
+  stdenv.mkDerivation (finalAttrs: {
     pname = "zfs-restore";
     # Must match the `version` in `build.zig.zon`.
     version = "0.2.0-dev";
@@ -21,11 +23,13 @@ in
       ];
     };
 
-    zigReleaseMode = "fast";
-    depsHash = "sha256-jF/wi+CVsGbjjOgYIdR7S0nMitqgjcTnNrswQBKGjBE=";
+    deps = callPackage ./deps.nix {};
+
+    zigBuildFlags = ["--system" "${finalAttrs.deps}"];
 
     nativeBuildInputs = [
       makeWrapper
+      zig.hook
     ];
 
     buildInputs = [
@@ -45,4 +49,4 @@ in
       maintainers = [lib.maintainers.ratakor];
       mainProgram = "zfs-restore";
     };
-  }
+  })

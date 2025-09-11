@@ -3,15 +3,16 @@
   bash,
   zig,
   zls,
+  zon2nix,
   gnutar,
   xz,
   p7zip,
 }:
 mkShellNoCC {
   packages = [
-    bash # required by zig-flake
     zig
     zls
+    zon2nix
 
     # `zig build release` dependencies
     gnutar
