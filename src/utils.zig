@@ -9,7 +9,6 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 // log file.
 pub const log = @import("axe").Axe(.{
     .scope_format = "@%",
-    .mutex = .{ .function = .progress_stderr },
 });
 
 pub const fmt = struct {
@@ -34,7 +33,7 @@ pub const fmt = struct {
 
 pub fn handleTerm(argv: []const []const u8, term: std.process.Child.Term) !void {
     switch (term) {
-        .Exited => |code| {
+        .exited => |code| {
             if (code != 0) {
                 log.err("Command `{f}` exited with code: {d}", .{ fmt.join(argv, " "), code });
                 return error.CommandFailed;
@@ -47,13 +46,13 @@ pub fn handleTerm(argv: []const []const u8, term: std.process.Child.Term) !void 
     }
 }
 
-pub fn computeFileHash(file: std.fs.File) ![Sha256.digest_length]u8 {
-    var sha256 = Sha256.init(.{});
+pub fn computeFileHash(io: std.Io, file: std.Io.File) ![Sha256.digest_length]u8 {
+    // https://codeberg.org/ziglang/zig/issues/30614
+    var useless_buffer: [1]u8 = undefined;
+    var file_reader = file.reader(io, &useless_buffer);
+
     var buffer: [4096]u8 = undefined;
-    var n = try file.read(&buffer);
-    while (n != 0) {
-        sha256.update(buffer[0..n]);
-        n = try file.read(&buffer);
-    }
-    return sha256.finalResult();
+    var hashed = file_reader.interface.hashed(Sha256.init(.{}), &buffer);
+    _ = try hashed.reader.discardRemaining();
+    return hashed.hasher.finalResult();
 }

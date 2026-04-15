@@ -28,7 +28,7 @@ const std = @import("std");
 pub const String = []const u8;
 pub const Col = struct {
     string: String,
-    color: ?std.Io.tty.Color = null,
+    color: ?std.Io.Terminal.Color = null,
 };
 pub fn Row(comptime num: usize) type {
     return [num]Col;
@@ -127,7 +127,7 @@ pub fn Table(comptime len: usize) type {
         rows: []const Row(len),
         mode: Separator.Mode = .ascii,
         padding: usize = 0,
-        tty_config: std.Io.tty.Config = .no_color,
+        terminal_mode: std.Io.Terminal.Mode = .no_color,
 
         const Self = @This();
 
@@ -151,7 +151,7 @@ pub fn Table(comptime len: usize) type {
 
         fn writeRow(
             self: Self,
-            writer: *std.io.Writer,
+            writer: *std.Io.Writer,
             row: []const Col,
             col_lens: [len]usize,
         ) !void {
@@ -207,8 +207,10 @@ pub fn Table(comptime len: usize) type {
             return lens;
         }
 
-        fn setColor(self: Self, writer: *std.Io.Writer, color: std.Io.tty.Color) std.Io.Writer.Error!void {
-            self.tty_config.setColor(writer, color) catch return std.Io.Writer.Error.WriteFailed;
+        fn setColor(self: Self, writer: *std.Io.Writer, color: std.Io.Terminal.Color) !void {
+            // I hate whoever changed this API
+            const terminal: std.Io.Terminal = .{ .mode = self.terminal_mode, .writer = writer };
+            terminal.setColor(color) catch return std.Io.Writer.Error.WriteFailed;
         }
 
         pub fn format(

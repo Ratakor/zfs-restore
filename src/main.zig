@@ -37,9 +37,9 @@ fn reportBadArg(diag: clap.Diagnostic, err: anyerror) void {
     }
 }
 
-fn usage(comptime params: []const clap.Param(clap.Help)) !void {
+fn usage(io: std.Io, comptime params: []const clap.Param(clap.Help)) !void {
     var buffer: [256]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&buffer);
+    var stderr_writer = std.Io.File.stderr().writer(io, &buffer);
     const stderr = &stderr_writer.interface;
 
     try stderr.writeAll("Usage: zfs-restore ");
@@ -54,20 +54,20 @@ fn usage(comptime params: []const clap.Param(clap.Help)) !void {
     try stderr.flush();
 }
 
-pub fn main() !u8 {
-    const cwd = std.fs.cwd();
+pub fn main(init: std.process.Init) !u8 {
+    const allocator = init.gpa;
+    const io = init.io;
+    const env = init.environ_map;
 
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    try log.init(io, null, env);
+    defer log.deinit();
 
-    var env_map = try std.process.getEnvMap(allocator);
-    defer env_map.deinit();
+    const cwd = std.Io.Dir.cwd();
 
-    try log.init(allocator, null, &env_map);
-    defer log.deinit(allocator);
-
-    const timezone = try zeit.local(allocator, &env_map);
+    const timezone = try zeit.local(allocator, io, .{
+        .tz = env.get("TZ"),
+        .tzdir = env.get("TZDIR"),
+    });
     defer timezone.deinit();
 
     const params = comptime clap.parseParamsComptime(
@@ -88,34 +88,45 @@ pub fn main() !u8 {
     };
 
     var diag: clap.Diagnostic = .{};
-    var res = clap.parse(clap.Help, &params, parsers, .{
+    var res = clap.parse(clap.Help, &params, parsers, init.minimal.args, .{
         .diagnostic = &diag,
         .allocator = allocator,
     }) catch |err| {
         reportBadArg(diag, err);
-        try usage(&params);
+        try usage(io, &params);
         return 1;
     };
     defer res.deinit();
 
-    var stdout_tty_config: std.Io.tty.Config = .detect(.stdout());
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+    const stdout = &stdout_writer.interface;
+
+    var stdout_terminal_mode: std.Io.Terminal.Mode = try .detect(
+        io,
+        .stdout(),
+        env.get("NO_COLOR") != null,
+        env.get("CLICOLOR_FORCE") != null,
+    );
     if (res.args.color) |color| {
+        // --color overrides env variables
         switch (color) {
-            .always => stdout_tty_config = .escape_codes, // no support for windows
-            .never => stdout_tty_config = .no_color,
+            .always => stdout_terminal_mode = .escape_codes, // we don't support windows
+            .never => stdout_terminal_mode = .no_color,
             .auto => {}, // already detected
         }
-        log.updateTtyConfig(color);
+        log.setTerminalMode(color, null);
         log.debugAt(@src(), "color: {t}", .{color});
     }
 
     if (res.args.help != 0) {
-        try usage(&params);
+        try usage(io, &params);
         return 0;
     }
 
     if (res.args.version != 0) {
-        try std.fs.File.stdout().writeAll(build_options.version_string ++ "\n");
+        try stdout.writeAll(build_options.version_string ++ "\n");
+        try stdout.flush();
         return 0;
     }
 
@@ -132,7 +143,7 @@ pub fn main() !u8 {
 
     const input_path = res.positionals[0] orelse {
         log.err("No path provided", .{});
-        try usage(&params);
+        try usage(io, &params);
         return 1;
     };
     log.debugAt(@src(), "input_path: {s}", .{input_path});
@@ -142,19 +153,19 @@ pub fn main() !u8 {
             break :blk try std.fs.path.resolve(allocator, &.{input_path});
         }
         // https://stackoverflow.com/questions/72709702/how-do-i-get-the-full-path-of-a-std-fs-dir
-        const working_directory = try cwd.realpathAlloc(allocator, ".");
+        const working_directory = try cwd.realPathFileAlloc(io, ".", allocator);
         defer allocator.free(working_directory);
         break :blk try std.fs.path.resolve(allocator, &.{ working_directory, input_path });
     };
     defer allocator.free(realpath);
     log.debugAt(@src(), "realpath: {s}", .{realpath});
 
-    const path_already_exist = if (cwd.access(realpath, .{})) true else |err| switch (err) {
+    const path_already_exist = if (cwd.access(io, realpath, .{})) true else |err| switch (err) {
         error.FileNotFound => false,
         else => return err,
     };
 
-    const mountpoint = try zfs.findMountpoint(allocator, realpath);
+    const mountpoint = try zfs.findMountpoint(allocator, io, realpath);
     defer allocator.free(mountpoint);
 
     const relative_path = realpath[mountpoint.len + 1 ..];
@@ -162,11 +173,12 @@ pub fn main() !u8 {
     const snapshot_dirname = try std.fs.path.join(allocator, &.{ mountpoint, ".zfs", "snapshot" });
     defer allocator.free(snapshot_dirname);
     log.debugAt(@src(), "snapshot_dirname: {s}", .{snapshot_dirname});
-    var snapshot_dir = try cwd.openDir(snapshot_dirname, .{ .iterate = true });
-    defer snapshot_dir.close();
+    var snapshot_dir = try cwd.openDir(io, snapshot_dirname, .{ .iterate = true });
+    defer snapshot_dir.close(io);
 
     var snapshots = try zfs.getSnapshots(
         allocator,
+        io,
         relative_path,
         snapshot_dirname,
         snapshot_dir,
@@ -205,9 +217,6 @@ pub fn main() !u8 {
     }
 
     // ask to restore
-    var stdout_buffer: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const stdout = &stdout_writer.interface;
 
     var table: pretty_table.Table(5) = .{
         .header = .{
@@ -219,7 +228,7 @@ pub fn main() !u8 {
         },
         .rows = undefined,
         .mode = .spaced_round,
-        .tty_config = stdout_tty_config,
+        .terminal_mode = stdout_terminal_mode,
     };
     var rows: std.ArrayList(pretty_table.Row(5)) = .empty;
     defer {
@@ -234,8 +243,8 @@ pub fn main() !u8 {
     }
 
     for (entries, 0..) |entry, index| {
-        const time = (try zeit.instant(.{
-            .source = .{ .unix_nano = entry.mtime },
+        const time = (try zeit.instant(io, .{
+            .source = .{ .unix_nano = entry.mtime.nanoseconds },
             .timezone = &timezone,
         })).time();
         var buffer: [32]u8 = undefined;
@@ -263,7 +272,7 @@ pub fn main() !u8 {
     try stdout.flush();
 
     var stdin_buffer: [32]u8 = undefined;
-    var stdin_reader = std.fs.File.stdin().reader(&stdin_buffer);
+    var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buffer);
     const stdin = &stdin_reader.interface;
     const input = try stdin.takeDelimiterExclusive('\n');
     log.debugAt(@src(), "input: {s}", .{input});
@@ -313,12 +322,7 @@ pub fn main() !u8 {
     defer allocator.free(to_restore_full_path);
     const cp_argv = [_][]const u8{ "cp", "-a", "--", to_restore_full_path, realpath };
     log.debugAt(@src(), "Running `{f}`", .{utils.fmt.join(&cp_argv, " ")});
-    const result = try std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &cp_argv,
-        .cwd_dir = cwd,
-        .env_map = &env_map,
-    });
+    const result = try std.process.run(allocator, io, .{ .argv = &cp_argv });
     log.debugAt(@src(), "stdout: {s}", .{result.stdout});
     log.debugAt(@src(), "stderr: {s}", .{result.stderr});
     try utils.handleTerm(&cp_argv, result.term);

@@ -12,8 +12,8 @@ pub const Snapshots = struct {
         name: []const u8,
         path: []const u8,
         size: u64,
-        mtime: i128,
-        kind: std.fs.File.Kind,
+        mtime: std.Io.Timestamp,
+        kind: std.Io.File.Kind,
 
         pub fn deinit(self: Entry, allocator: std.mem.Allocator) void {
             allocator.free(self.name);
@@ -54,11 +54,11 @@ pub const Snapshots = struct {
     // naming is terrible
 
     pub fn newestFirst(_: void, lhs: Entry, rhs: Entry) bool {
-        return lhs.mtime > rhs.mtime;
+        return lhs.mtime.nanoseconds > rhs.mtime.nanoseconds;
     }
 
     pub fn oldestFirst(_: void, lhs: Entry, rhs: Entry) bool {
-        return lhs.mtime < rhs.mtime;
+        return lhs.mtime.nanoseconds < rhs.mtime.nanoseconds;
     }
 
     pub fn largestFirst(_: void, lhs: Entry, rhs: Entry) bool {
@@ -92,9 +92,9 @@ const ZfsMountOutput = struct {
     };
 };
 
-fn runZfsMount(allocator: std.mem.Allocator) ![]const u8 {
+fn runZfsMount(allocator: std.mem.Allocator, io: std.Io) ![]const u8 {
     const argv = [_][]const u8{ "zfs", "mount", "--json" };
-    const result = try std.process.Child.run(.{ .allocator = allocator, .argv = &argv });
+    const result = try std.process.run(allocator, io, .{ .argv = &argv });
     errdefer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
@@ -106,8 +106,8 @@ fn runZfsMount(allocator: std.mem.Allocator) ![]const u8 {
     return result.stdout;
 }
 
-pub fn findMountpoint(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
-    const zfs_output = try runZfsMount(allocator);
+pub fn findMountpoint(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![]const u8 {
+    const zfs_output = try runZfsMount(allocator, io);
     defer allocator.free(zfs_output);
 
     const parsed = try std.json.parseFromSlice(ZfsMountOutput, allocator, zfs_output, .{});
@@ -148,24 +148,18 @@ pub fn findMountpoint(allocator: std.mem.Allocator, path: []const u8) ![]const u
 
 pub fn getSnapshots(
     allocator: std.mem.Allocator,
+    io: std.Io,
     relative_path: []const u8,
     snapshot_dirname: []const u8,
-    snapshot_dir: std.fs.Dir,
+    snapshot_dir: std.Io.Dir,
 ) !Snapshots {
     var snapshots: Snapshots = .{};
     errdefer snapshots.deinit(allocator);
 
-    const flags: std.posix.O = .{
-        .PATH = true, // record only the target path in the opened descriptor
-        .NOFOLLOW = true, // do not follow symlinks
-        .CLOEXEC = true, // automatically close file on execve(2)
-    };
-    log.debugAt(@src(), "flags: {}", .{flags});
-
     var iter = snapshot_dir.iterate();
     var total_snapshots: usize = 0;
     var duplicate_entries: usize = 0;
-    while (try iter.next()) |entry| : (total_snapshots += 1) {
+    while (try iter.next(io)) |entry| : (total_snapshots += 1) {
         if (entry.kind != .directory) {
             log.warn("Skipping non-directory entry in '{s}': {s}", .{ snapshot_dirname, entry.name });
             continue;
@@ -173,21 +167,24 @@ pub fn getSnapshots(
 
         const path = try std.fs.path.join(allocator, &.{ entry.name, relative_path });
         errdefer allocator.free(path);
-        const fd = std.posix.openat(snapshot_dir.fd, path, flags, 0) catch |err| switch (err) {
+        const path_file = snapshot_dir.openFile(io, path, .{
+            .path_only = true,
+            .follow_symlinks = false,
+        }) catch |err| switch (err) {
             error.FileNotFound => {
                 allocator.free(path);
                 continue;
             },
             else => return err,
         };
-        defer std.posix.close(fd);
+        defer path_file.close(io);
 
-        const stat = try std.fs.File.stat(.{ .handle = fd });
+        const stat = try path_file.stat(io);
         const gop = gop: switch (stat.kind) {
             .file => if (stat.size <= max_file_size_for_hash) {
-                const file = try snapshot_dir.openFile(path, .{});
-                defer file.close();
-                const hash = try utils.computeFileHash(file);
+                const file = try snapshot_dir.openFile(io, path, .{});
+                defer file.close(io);
+                const hash = try utils.computeFileHash(io, file);
                 // log.debugAt(@src(), "{s}\t{s}", .{ std.fmt.bytesToHex(&hash, .lower), entry.name });
                 break :gop try snapshots.map.getOrPut(allocator, &hash);
             } else {
@@ -195,7 +192,8 @@ pub fn getSnapshots(
             },
             .sym_link => {
                 var buffer: [4096]u8 = undefined;
-                const key = try snapshot_dir.readLink(path, &buffer);
+                const n = try snapshot_dir.readLink(io, path, &buffer);
+                const key = buffer[0..n];
                 // log.debugAt(@src(), "Symlink {s} -> {s}", .{ entry.name, key });
                 break :gop try snapshots.map.getOrPut(allocator, key);
             },

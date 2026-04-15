@@ -1,12 +1,13 @@
 .{
     .name = .zfs_restore,
+    // Remove `-dev` when tagging a new release and add it back on the next development cycle.
     .version = "0.2.0-dev",
     .fingerprint = 0xf4602157f5f7b2fe,
-    .minimum_zig_version = "0.15.1",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .axe = .{
-            .url = "git+https://github.com/ratakor/axe#ee0b7f46fee3988844c06bc66038477c8aa86d8d",
-            .hash = "axe-0.7.0-M2JU5ceNAAAsFTeUNNISXldu4sg-3yT3zEBc1-ObTb9W",
+            .url = "git+https://github.com/Ratakor/axe#2fe931811c7a92fd4955625fd1f6b928d618272c",
+            .hash = "axe-0.8.0-M2JU5TWRAACEUcEGP216G2yzu2ZEv5ctNyW2iGxuS3pL",
         },
         .sizeify = .{
             .url = "git+https://github.com/ciathefed/sizeify#0ef93d13a44f231f392c4804ed3b724b3031b8d0",
@@ -14,12 +15,12 @@
         },
         .zeit = .{
             // keep in sync with axe
-            .url = "git+https://github.com/rockorager/zeit?ref=zig-0.15#ed2ca60db118414bda2b12df2039e33bad3b0b88",
-            .hash = "zeit-0.6.0-5I6bk0J9AgCVa0nnyL0lNY9Xa9F68hHq-ZarhuXNV-Jb",
+            .url = "git+https://github.com/rockorager/zeit?ref=0.16#fdaad9c5884f41a3640c768f4f9fc116e763c321",
+            .hash = "zeit-0.6.0-5I6bk3K6AgCFnc_9CN7KJjaeNJz1VuwP4DA7Gs9vgxuz",
         },
         .clap = .{
-            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",
-            .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
+            .url = "git+https://github.com/Hejsil/zig-clap#fc1e5cc3f6d9d3001112385ee6256d694e959d2f",
+            .hash = "clap-0.11.0-oBajB7foAQC3Iyn4IVCkUdYaOVVng5IZkSncySTjNig1",
         },
     },
     .paths = .{
