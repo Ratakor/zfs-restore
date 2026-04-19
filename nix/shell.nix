@@ -1,6 +1,5 @@
 {
   mkShellNoCC,
-  bash,
   zig,
   zls,
   zon2nix,

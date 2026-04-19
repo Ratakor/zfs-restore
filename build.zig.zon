@@ -3,20 +3,28 @@
     // Remove `-dev` when tagging a new release and add it back on the next development cycle.
     .version = "0.2.0-dev",
     .fingerprint = 0xf4602157f5f7b2fe,
+    // Must be kept in sync with `flake.lock` via the following command:
+    // ```
+    // nix flake update
+    // ```
     .minimum_zig_version = "0.16.0",
+    // Must be kept in sync with `nix/deps.nix` via the following command:
+    // ```
+    // zon2nix > nix/deps.nix
+    // ```
     .dependencies = .{
         .axe = .{
-            .url = "git+https://github.com/Ratakor/axe#2fe931811c7a92fd4955625fd1f6b928d618272c",
-            .hash = "axe-0.8.0-M2JU5TWRAACEUcEGP216G2yzu2ZEv5ctNyW2iGxuS3pL",
+            .url = "git+https://github.com/Ratakor/axe#186078c497e4e4dab20926c1b135fa9ab8a6a3b1",
+            .hash = "axe-0.8.0-M2JU5SuRAABRUbICFInh_GltUm46JBd986HQCE7j6BJz",
         },
         .sizeify = .{
             .url = "git+https://github.com/ciathefed/sizeify#0ef93d13a44f231f392c4804ed3b724b3031b8d0",
             .hash = "sizeify-0.0.0-URVFj1EhAAAXtotBNFwEx5W70ygRnAdHjBYcg4F_CahM",
         },
         .zeit = .{
-            // keep in sync with axe
-            .url = "git+https://github.com/rockorager/zeit?ref=0.16#fdaad9c5884f41a3640c768f4f9fc116e763c321",
-            .hash = "zeit-0.6.0-5I6bk3K6AgCFnc_9CN7KJjaeNJz1VuwP4DA7Gs9vgxuz",
+            // should be kept in sync with axe
+            .url = "git+https://github.com/rockorager/zeit#2a79678e05e4e82cd4efd4fd6b754dcf029c3a64",
+            .hash = "zeit-0.6.0-5I6bk7q6AgBdMJxze3D4l9ylQhkviQ_BX9FigDt13MFn",
         },
         .clap = .{
             .url = "git+https://github.com/Hejsil/zig-clap#fc1e5cc3f6d9d3001112385ee6256d694e959d2f",
