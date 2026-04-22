@@ -1,6 +1,6 @@
 {
   lib,
-  stdenv,
+  stdenvNoCC,
   callPackage,
   makeWrapper,
   zig,
@@ -11,7 +11,7 @@
 let
   fs = lib.fileset;
 in
-stdenv.mkDerivation (finalAttrs: {
+stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "zfs-restore";
   inherit (import ./version.nix lib) version;
 
@@ -44,7 +44,8 @@ stdenv.mkDerivation (finalAttrs: {
       --system $PACKAGE_DIR \
       --release=${releaseMode} \
       -Dversion-string=${finalAttrs.version} \
-      --color off
+      --color off \
+      --prefix $out
   '';
 
   doCheck = true;
@@ -55,7 +56,9 @@ stdenv.mkDerivation (finalAttrs: {
       --color off
   '';
 
-  postInstall = ''
+  # prefix is set to $out during buildPhase and smh installPhase doesn't work
+  dontInstall = true;
+  postBuild = ''
     wrapProgram $out/bin/zfs-restore \
       --prefix PATH : ${
         lib.makeBinPath [
