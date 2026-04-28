@@ -54,6 +54,11 @@ fn usage(io: std.Io, comptime params: []const clap.Param(clap.Help)) !void {
     try stderr.flush();
 }
 
+fn readLine(stdin: *std.Io.Reader) ![]const u8 {
+    const input = try stdin.takeDelimiterInclusive('\n');
+    return if (input.len > 0) input[0 .. input.len - 1] else input;
+}
+
 pub fn main(init: std.process.Init) !u8 {
     const allocator = init.gpa;
     const io = init.io;
@@ -274,7 +279,8 @@ pub fn main(init: std.process.Init) !u8 {
     var stdin_buffer: [32]u8 = undefined;
     var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buffer);
     const stdin = &stdin_reader.interface;
-    const input = try stdin.takeDelimiterExclusive('\n');
+    const input = try readLine(stdin);
+
     log.debugAt(@src(), "input: {s}", .{input});
 
     const parsed_input = if (input.len == 0) 0 else try std.fmt.parseInt(usize, input, 10);
@@ -308,7 +314,7 @@ pub fn main(init: std.process.Init) !u8 {
         log.warn("'{s}' already exist", .{realpath});
         try stdout.writeAll("Overwrite? [y/N]: ");
         try stdout.flush();
-        const confirm = try stdin.takeDelimiterExclusive('\n');
+        const confirm = try readLine(stdin);
         log.debugAt(@src(), "confirm: {s}", .{confirm});
         if (confirm.len == 0 or !std.ascii.startsWithIgnoreCase("yes", confirm)) {
             log.info("Aborting...", .{});
