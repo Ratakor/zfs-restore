@@ -1,6 +1,6 @@
 {
   lib,
-  stdenvNoCC,
+  stdenv,
   callPackage,
   makeWrapper,
   zig,
@@ -11,7 +11,7 @@
 let
   fs = lib.fileset;
 in
-stdenvNoCC.mkDerivation (finalAttrs: {
+stdenv.mkDerivation (finalAttrs: {
   pname = "zfs-restore";
   inherit (import ./version.nix lib) version;
 
