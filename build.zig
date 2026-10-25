@@ -139,9 +139,7 @@ pub fn build(b: *std.Build) void {
     // zib build run
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
@@ -153,7 +151,7 @@ pub fn build(b: *std.Build) void {
 
     // zig build fmt
     const fmt_step = b.step("fmt", "Format all source files");
-    fmt_step.dependOn(&b.addFmt(.{ .paths = &.{ "build.zig", "src" } }).step);
+    fmt_step.dependOn(&b.addFmt(.{ .paths = b.pathList(&.{ "build.zig", "src" }) }).step);
 }
 
 /// Returns `MAJOR.MINOR.PATCH-dev` when `git describe` failed.
@@ -168,7 +166,7 @@ fn getVersion(b: *std.Build) std.SemanticVersion {
     if (version.pre == null and version.build == null) return version;
 
     const argv: []const []const u8 = &.{
-        "git", "-C", b.pathFromRoot("."), "--git-dir", ".git", "describe", "--match", "*.*.*", "--tags",
+        "git", "-C", b.root.toString(b.allocator) catch @panic("OOM"), "--git-dir", ".git", "describe", "--match", "*.*.*", "--tags",
     };
     var code: u8 = undefined;
     const git_describe_untrimmed = b.runAllowFail(argv, &code, .ignore) catch |err| {
@@ -229,7 +227,7 @@ fn release(b: *std.Build, release_artifacts: []const *std.Build.Step.Compile, re
     const FileExtension = enum { zip, @"tar.xz" };
 
     if (release_version.pre != null and release_version.build == null) {
-        release_step.addError("Cannot build release because the version could not be resolved", .{}) catch @panic("OOM");
+        release_step.dependOn(&b.addFail("Cannot build release because the version could not be resolved").step);
         return;
     }
 
@@ -264,12 +262,12 @@ fn release(b: *std.Build, release_artifacts: []const *std.Build.Step.Compile, re
                 compress_cmd.setEnvironmentVariable("XZ_OPT", "-9");
                 compress_cmd.addArgs(&.{ "tar", "caf" });
                 file_path = compress_cmd.addOutputFileArg(file_name);
-                compress_cmd.addPrefixedDirectoryArg("-C", exe.getEmittedBinDirectory());
-                compress_cmd.addArg(exe_name);
-
-                compress_cmd.addPrefixedDirectoryArg("-C", b.path("."));
-                compress_cmd.addArg("LICENSE");
-                compress_cmd.addArg("README.md");
+                const files = b.addWriteFiles();
+                _ = files.addCopyFile(exe.getEmittedBin(), exe_name);
+                _ = files.addCopyFile(b.path("LICENSE"), "LICENSE");
+                _ = files.addCopyFile(b.path("README.md"), "README.md");
+                compress_cmd.addPrefixedDirectoryArg("-C", files.getDirectory());
+                compress_cmd.addArgs(&.{ exe_name, "LICENSE", "README.md" });
 
                 compress_cmd.addArgs(&.{
                     "--sort=name",

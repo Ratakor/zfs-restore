@@ -248,10 +248,7 @@ pub fn main(init: std.process.Init) !u8 {
     }
 
     for (entries, 0..) |entry, index| {
-        const time = (try zeit.instant(io, .{
-            .source = .{ .unix_nano = entry.mtime.nanoseconds },
-            .timezone = &timezone,
-        })).time();
+        const time = zeit.instant(.{ .unix_nano = entry.mtime.nanoseconds }, &timezone).time();
         var buffer: [32]u8 = undefined;
         var time_writer = std.Io.Writer.fixed(&buffer);
         try time.strftime(&time_writer, "%d %b %H:%M");
@@ -335,4 +332,9 @@ pub fn main(init: std.process.Init) !u8 {
     // try std.fs.Dir.copyFile(snapshot_dir, to_restore.path, cwd, realpath, .{});
 
     return 0;
+}
+
+test {
+    _ = @import("pretty_table.zig");
+    _ = @import("zfs.zig");
 }

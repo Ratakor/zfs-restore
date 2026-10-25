@@ -8,19 +8,19 @@
 
 linkFarm "zig-packages" [
   {
-    name = "axe-0.8.0-M2JU5SuRAABRUbICFInh_GltUm46JBd986HQCE7j6BJz";
+    name = "axe-0.9.0-M2JU5R6RAAA-iU1v8YHw3dSB8XMmnltmDT1aQJCTqlgp";
     path = fetchgit {
       url = "https://github.com/Ratakor/axe";
-      rev = "186078c497e4e4dab20926c1b135fa9ab8a6a3b1";
-      hash = "sha256-DV4yH43OBzmeLTRZXRWVn8r+TEI22u4bmhdr4nLg+4U=";
+      rev = "9fd354c246ae4aa0e45dde6b00ee3f970201be5c";
+      hash = "sha256-boU6GiiUJ2fKaiUWinqxKMFY6QbC4JZm/TGGpvWW3lU=";
     };
   }
   {
-    name = "clap-0.11.0-oBajB7foAQC3Iyn4IVCkUdYaOVVng5IZkSncySTjNig1";
+    name = "clap-0.12.0-oBajB4XpAQCF1WRKnD5KOKPsnwwT_NNdAJ7Ww3irYJac";
     path = fetchgit {
       url = "https://github.com/Hejsil/zig-clap";
-      rev = "fc1e5cc3f6d9d3001112385ee6256d694e959d2f";
-      hash = "sha256-sIDCZW4q9BQwy4AJjJ6r+mSkJ3usbnMmY9zkE4EVAy8=";
+      rev = "05faf3905e8548f5cc269a8836e154065e70128d";
+      hash = "sha256-8d5Rs7mwjSSr3qA0MpanIBo7ZbgAwm3u12/j0JhnZNg=";
     };
   }
   {
@@ -32,11 +32,11 @@ linkFarm "zig-packages" [
     };
   }
   {
-    name = "zeit-0.6.0-5I6bk7q6AgBdMJxze3D4l9ylQhkviQ_BX9FigDt13MFn";
+    name = "zeit-0.10.0-5I6bkxS-AgAaI3lI3RsXsWnPw7sMCqJKoFnSB8_QRAoo";
     path = fetchgit {
       url = "https://github.com/rockorager/zeit";
-      rev = "2a79678e05e4e82cd4efd4fd6b754dcf029c3a64";
-      hash = "sha256-LFNg8yu82OcQ+Yyxw1bTotjW18oVhNiYrFGIE/7WWR4=";
+      rev = "06bb7b462b4218770fb5438ebe6b0c0c5ef18888";
+      hash = "sha256-Yi8EqBA49ZArYyj2uAjkMkDp/dkq7Qs+lSF+z9czLAQ=";
     };
   }
 ]

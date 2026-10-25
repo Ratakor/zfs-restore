@@ -116,7 +116,7 @@ pub const Separator = struct {
             .spaced_round => spaced_round,
         };
 
-        return sep_table[@intFromEnum(row_pos)][@intFromEnum(col_pos)];
+        return sep_table[@backingInt(row_pos)][@backingInt(col_pos)];
     }
 };
 
@@ -245,19 +245,19 @@ pub fn Table(comptime len: usize) type {
 
 test "normal usage" {
     const t = Table(2){
-        .header = [_]String{ "Version", "Date" },
-        .rows = &[_][2]String{
-            .{ "0.7.1", "2020-12-13" },
-            .{ "0.7.0", "2020-11-08" },
-            .{ "0.6.0", "2020-04-13" },
-            .{ "0.5.0", "2019-09-30" },
+        .header = .{ .{ .string = "Version" }, .{ .string = "Date" } },
+        .rows = &[_]Row(2){
+            .{ .{ .string = "0.7.1" }, .{ .string = "2020-12-13" } },
+            .{ .{ .string = "0.7.0" }, .{ .string = "2020-11-08" } },
+            .{ .{ .string = "0.6.0" }, .{ .string = "2020-04-13" } },
+            .{ .{ .string = "0.5.0" }, .{ .string = "2019-09-30" } },
         },
         .footer = null,
     };
 
-    var out = std.ArrayList(u8).init(std.testing.allocator);
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
-    try out.writer().print("{}", .{t});
+    try out.writer.print("{f}", .{t});
 
     try std.testing.expectEqualStrings(
         \\+-------+----------+
@@ -269,22 +269,22 @@ test "normal usage" {
         \\|0.5.0  |2019-09-30|
         \\+-------+----------+
         \\
-    , out.items);
+    , out.written());
 }
 
 test "footer usage" {
     const t = Table(2){
-        .header = [_]String{ "Language", "Files" },
-        .rows = &[_][2]String{
-            .{ "Zig", "3" },
-            .{ "Python", "2" },
+        .header = .{ .{ .string = "Language" }, .{ .string = "Files" } },
+        .rows = &[_]Row(2){
+            .{ .{ .string = "Zig" }, .{ .string = "3" } },
+            .{ .{ .string = "Python" }, .{ .string = "2" } },
         },
-        .footer = [2]String{ "Total", "5" },
+        .footer = .{ .{ .string = "Total" }, .{ .string = "5" } },
     };
 
-    var out = std.ArrayList(u8).init(std.testing.allocator);
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
-    try out.writer().print("{}", .{t});
+    try out.writer.print("{f}", .{t});
 
     try std.testing.expectEqualStrings(
         \\+--------+-----+
@@ -296,5 +296,5 @@ test "footer usage" {
         \\|Total   |5    |
         \\+--------+-----+
         \\
-    , out.items);
+    , out.written());
 }
